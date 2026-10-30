@@ -4,9 +4,9 @@ Repository: https://github.com/niconguyen2209/LeadFinder
 
 ## Kiến trúc
 
-`render.yaml` tạo một Web Service Docker và một Render PostgreSQL, cùng vùng Singapore. Trong Web Service có giao diện đã build, FastAPI, một Celery worker solo, Celery beat và Redis chỉ lắng nghe `127.0.0.1`. Không cần VPS hay máy công ty chạy bộ cào. Chỉ chạy một instance web để tránh nhân đôi bộ điều phối và broker nội bộ.
+`render.yaml` tạo một Web Service Docker và một Render PostgreSQL, cùng vùng Singapore. Trong Web Service có giao diện đã build, FastAPI và một tiến trình thu thập duy nhất lấy việc từ PostgreSQL (`QUEUE_MODE=database`). Không chạy Redis/Celery/beat riêng ở bản Render để giảm RAM. Không cần VPS hay máy công ty chạy bộ cào. Chỉ chạy một instance web.
 
-Redis trong container là hàng đợi tạm; hồ sơ, nguồn, phiên đăng nhập, đợt thu thập và checkpoint lưu trong PostgreSQL. Khi Render khởi động lại, các đợt queued được điều phối lại. Đợt đang chạy bị gián đoạn sẽ được đối soát sau khoảng bốn phút, chuyển về tạm dừng để bấm Tiếp tục. Không dùng SQLite trên ổ đĩa tạm của Render.
+Hồ sơ, nguồn, phiên đăng nhập, hàng đợi, đợt thu thập và checkpoint lưu trong PostgreSQL. Khi Render khởi động lại, các đợt queued được điều phối lại. Đợt đang chạy bị gián đoạn sẽ được đối soát sau khoảng bốn phút, chuyển về tạm dừng để bấm Tiếp tục. Không dùng SQLite trên ổ đĩa tạm của Render. Compose local vẫn giữ Celery/Redis như trước.
 
 ## Tạo dịch vụ
 
@@ -41,7 +41,7 @@ Tài liệu nguồn: [Render Free](https://render.com/docs/free), [Docker](https
 
 ## Các file triển khai
 
-- `Dockerfile`: build React, đóng gói Python/Chromium/Redis.
+- `Dockerfile`: build React, đóng gói Python/Chromium và runtime tiết kiệm bộ nhớ.
 - `deploy/render_runtime.py`: migrations, bootstrap quản trị viên, giám sát và dừng các tiến trình.
 - `render.yaml`: định nghĩa Web Service và PostgreSQL, tham chiếu DB nội bộ.
 - `.dockerignore`, `.gitignore`: loại secrets, tài liệu riêng, môi trường local, bản sao lưu và build artifacts.
@@ -55,3 +55,5 @@ Docker Compose local vẫn dùng cấu hình riêng ở `compose.yaml`.
 - Container thử giới hạn 512 MiB RAM và 0.1 CPU khởi động, chạy migration, bootstrap quản trị viên, trả readiness và đăng nhập thành công.
 - Lượt thực tế tìm `Mộc quán Seafood`, Đà Nẵng, mục tiêu 1, không đọc thêm website: completed, lưu 1 địa điểm thật. Dữ liệu thử ở DB riêng, không đưa vào database local chính hoặc repo.
 - Bộ nhớ quan sát khi chờ khoảng 256 MiB; một lần quan sát khi đang đọc Maps khoảng 509 MiB, container không bị OOM trong lượt này. Đây không phải bảo đảm mọi lượt đều vừa 512 MiB; nên theo dõi và nâng compute nếu thường xuyên hết bộ nhớ.
+
+Bản gộp Redis/Celery đầu tiên khởi động được nhưng lượt cào thực tế trên Render vượt 512 MB và bị restart. Vì vậy bản Render được đổi sang hàng đợi PostgreSQL và một tiến trình collector nhẹ, đồng thời chạy bootstrap ở tiến trình tạm để không giữ thư viện nặng trong supervisor. Các số đo 256/509 MiB phía trên thuộc bản trước khi tối ưu, không dùng để khẳng định mức dùng của bản mới.

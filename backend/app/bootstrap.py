@@ -22,3 +22,10 @@ def bootstrap_admin(db):
     db.add(User(id=1, username=username, password_hash=hash_password(password)))
     db.commit()
     return True
+
+
+if __name__ == "__main__":
+    from .db import SessionLocal
+
+    with SessionLocal() as session:
+        bootstrap_admin(session)

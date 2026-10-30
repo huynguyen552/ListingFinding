@@ -20,8 +20,8 @@ services:
         sync: false
       - key: SECURE_COOKIES
         value: "1"
-      - key: REDIS_URL
-        value: redis://127.0.0.1:6379/0
+      - key: QUEUE_MODE
+        value: database
 databases:
   - name: leadfinder-db
     databaseName: leadfinder

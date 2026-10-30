@@ -12,7 +12,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     PYTHONDONTWRITEBYTECODE=1 \
     MALLOC_ARENA_MAX=2 \
     FRONTEND_DIST=/app/static \
-    REDIS_URL=redis://127.0.0.1:6379/0 \
+    QUEUE_MODE=database \
     SECURE_COOKIES=1 \
     PORT=10000
 RUN apt-get update && apt-get install -y --no-install-recommends redis-server \

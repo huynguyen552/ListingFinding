@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -79,6 +81,8 @@ def start(body: StartCrawl, user=Depends(current_user), db: Session = Depends(ge
         )
     )
     db.commit()
+    if os.getenv("QUEUE_MODE") == "database":
+        return job_view(db, job)
     # Commit first. Dispatcher retries queued jobs if the broker is temporarily offline.
     try:
         from .worker import crawl

@@ -1,6 +1,7 @@
 """Google Maps discovery and website enrichment with persistent checkpoints."""
 
 import hashlib
+import os
 import re
 import secrets
 import time
@@ -68,6 +69,11 @@ def in_area(address, area):
 
 
 def tick(job_id, token, message=None):
+    if os.getenv("QUEUE_MODE") == "database":
+        from .queueing import shutdown_requested
+
+        if shutdown_requested.is_set():
+            raise StopCrawl()
     with SessionLocal() as db:
         job = db.get(CrawlJob, job_id)
         if not job or job.run_token != token or job.status != "running":

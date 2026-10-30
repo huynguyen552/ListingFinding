@@ -9,6 +9,26 @@ from pathlib import Path
 
 
 def process_commands(port):
+    if os.getenv("QUEUE_MODE") == "database":
+        return [
+            ("crawler", [sys.executable, "-m", "app.render_worker"]),
+            (
+                "web",
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "app.main:app",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    str(port),
+                    "--workers",
+                    "1",
+                    "--no-proxy-headers",
+                ],
+            ),
+        ]
     return [
         (
             "redis",
@@ -103,11 +123,8 @@ def main():
     if not 1 <= port <= 65535:
         raise RuntimeError("Invalid PORT.")
     subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], check=True, timeout=120)
-    from app.bootstrap import bootstrap_admin
-    from app.db import SessionLocal
-
-    with SessionLocal() as db:
-        bootstrap_admin(db)
+    # Keep FastAPI/SQLAlchemy imports out of the long-lived supervisor process.
+    subprocess.run([sys.executable, "-m", "app.bootstrap"], check=True, timeout=120)
     # Runtime disk is disposable. Crawl entries and queue checkpoints live in PG.
     Path("/tmp/leadfinder").mkdir(exist_ok=True)
     processes = []

@@ -54,7 +54,8 @@ def test_cloud_session_cookie_is_secure(client, monkeypatch):
     assert "HttpOnly" in response.headers["set-cookie"]
 
 
-def test_cloud_runtime_starts_one_crawler_with_dynamic_port():
+def test_cloud_runtime_starts_one_crawler_with_dynamic_port(monkeypatch):
+    monkeypatch.delenv("QUEUE_MODE", raising=False)
     path = Path(__file__).resolve().parents[2] / "deploy" / "render_runtime.py"
     if not path.exists():
         pytest.skip("The local backend-only image does not include Render runtime.")
@@ -66,3 +67,43 @@ def test_cloud_runtime_starts_one_crawler_with_dynamic_port():
     assert "--pool=solo" in commands["crawler"]
     assert "--concurrency=1" in commands["crawler"]
     assert "127.0.0.1" in commands["redis"]
+    monkeypatch.setenv("QUEUE_MODE", "database")
+    commands = dict(runtime.process_commands(12345))
+    assert set(commands) == {"crawler", "web"}
+    assert "app.render_worker" in commands["crawler"]
+
+
+def test_database_queue_does_not_publish_to_redis(auth, monkeypatch):
+    import uuid
+
+    from app.queueing import collect_work
+
+    monkeypatch.setenv("QUEUE_MODE", "database")
+
+    published = []
+    monkeypatch.setattr("app.worker.crawl.apply_async", lambda *a, **k: published.append(a))
+    response = auth.post(
+        "/api/v1/crawl-jobs",
+        json={
+            "keyword": "quán ăn",
+            "area": "Đà Nẵng",
+            "target": 1,
+            "request_key": str(uuid.uuid4()),
+        },
+    )
+    assert response.status_code == 202
+    assert published == []
+    assert collect_work() == [response.json()["id"]]
+
+
+def test_database_worker_stops_at_checkpoint(monkeypatch):
+    from app.crawling import StopCrawl, tick
+    from app.queueing import shutdown_requested
+
+    monkeypatch.setenv("QUEUE_MODE", "database")
+    shutdown_requested.set()
+    try:
+        with pytest.raises(StopCrawl):
+            tick("not-a-real-job", "old")
+    finally:
+        shutdown_requested.clear()
