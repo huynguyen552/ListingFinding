@@ -57,3 +57,12 @@ Docker Compose local vẫn dùng cấu hình riêng ở `compose.yaml`.
 - Bộ nhớ quan sát khi chờ khoảng 256 MiB; một lần quan sát khi đang đọc Maps khoảng 509 MiB, container không bị OOM trong lượt này. Đây không phải bảo đảm mọi lượt đều vừa 512 MiB; nên theo dõi và nâng compute nếu thường xuyên hết bộ nhớ.
 
 Bản gộp Redis/Celery đầu tiên khởi động được nhưng lượt cào thực tế trên Render vượt 512 MB và bị restart. Vì vậy bản Render được đổi sang hàng đợi PostgreSQL và một tiến trình collector nhẹ, đồng thời chạy bootstrap ở tiến trình tạm để không giữ thư viện nặng trong supervisor. Các số đo 256/509 MiB phía trên thuộc bản trước khi tối ưu, không dùng để khẳng định mức dùng của bản mới.
+
+## Kết quả cuối trên Render Free
+
+- Website: https://leadfinder-7bgc.onrender.com — đã deploy thành công, đăng nhập và readiness PostgreSQL hoạt động.
+- UptimeRobot Free đã có monitor HTTP(s) gọi `/api/v1/health/live` mỗi 5 phút, đã quan sát trạng thái Up.
+- Bản collector PostgreSQL mới giảm RAM chờ trong môi trường thử xuống khoảng 123 MiB; 110 kiểm thử SQLite qua, 109 kiểm thử PostgreSQL qua và 1 ca kiểm tra đường dẫn source được bỏ qua trong image.
+- Dù vậy, **lượt đọc chi tiết Google Maps thực tế trên Render vẫn vượt 512 MB**, Render ghi sự kiện OOM và tự khởi động lại. Không coi phép thử thành công ở máy local là bằng chứng bộ cào chạy được ổn định trên Render Free.
+- Người dùng chọn giữ Free và dừng cào. Lượt cào thử cloud đã được hủy; không nâng compute hoặc phát sinh phí. Website, database và monitor tiếp tục tồn tại. Chưa khẳng định chức năng cào ổn định với gói Free.
+- Trang Compute lúc kiểm tra niêm yết 1 CPU / 2 GB RAM ở mức 25 USD/tháng riêng phần web; đây là lựa chọn trả phí chưa được áp dụng. PostgreSQL Free vẫn có giới hạn hết hạn 30 ngày như trên.
