@@ -1,18 +1,14 @@
-# LeadFinder Local
+# LeadFinder
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/niconguyen2209/LeadFinder)
+LeadFinder là ứng dụng tiếng Việt để thu thập và quản lý thông tin khách hàng tiềm năng cho quán ăn, nhà hàng. Bản hiện tại được dùng trên máy local bằng Docker Compose; không còn triển khai LeadFinder trên VPS. Dữ liệu PostgreSQL cũ trên VPS chưa được chuyển sang máy local.
 
-Triển khai toàn bộ trên Render bằng `render.yaml` và Dockerfile ở thư mục gốc. Xem [hướng dẫn Render và UptimeRobot](docs/render.md) để tạo tài khoản quản trị, theo dõi dịch vụ và giữ dữ liệu. Bản Free là cấu hình thử nghiệm; cần kiểm tra giới hạn RAM khi chạy Chromium.
-
-Đã bổ sung chế độ đọc Maps tiết kiệm bộ nhớ: chỉ mở Chromium khi cần, dùng lại dữ liệu hồ sơ đã đọc và đóng trình duyệt trước khi lưu/đọc website. Xem [số đo và giới hạn kiểm tra](docs/performance.md); số đo local không bảo đảm mọi truy vấn đều vừa RAM của Render Free.
-
-Ứng dụng quản lý dữ liệu khách hàng tiềm năng cho quán ăn/nhà hàng, chạy trên máy cá nhân. Giao diện tiếng Việt, dữ liệu lưu trong PostgreSQL.
+Ứng dụng đọc kết quả Google Maps bằng Chromium. Maps có thể thay đổi kết quả, giới hạn truy cập hoặc đóng kết nối tới một số máy chủ; số lượng và kết quả giữa các lượt chạy không được bảo đảm giống nhau. Xem [số đo hiệu năng và các giới hạn đã kiểm tra](docs/performance.md).
 
 ## Trạng thái hiện tại — 0.2.0
 
 Chức năng chính: nhập từ khóa, khu vực và số lượng → chạy trình duyệt nền tìm Google Maps → đọc tên, SĐT, địa chỉ, website → tùy chọn đọc website/trang liên hệ để tìm MST và các kênh liên hệ công khai → lưu kết quả có nguồn → xuất Excel/CSV theo đợt.
 
-Không cần API key cho luồng Google Maps trực tiếp. Có worker Celery, lịch đối soát, tạm dừng/tiếp tục/hủy, kết quả từng phần và lịch sử 30 đợt gần nhất. Trạng thái/từng địa điểm nằm trong PostgreSQL; một thời điểm chạy một đợt. Website có chặn hoặc Google yêu cầu xác minh thì ghi lỗi/dừng, không vượt CAPTCHA. Số lượng là mục tiêu, không bảo đảm đạt đủ. Khu vực được đối chiếu với địa chỉ, không chỉ với tên quán.
+Không cần API key cho luồng Google Maps trực tiếp. Có worker Celery, lịch đối soát, tạm dừng/tiếp tục/hủy, kết quả từng phần và lịch sử 30 đợt gần nhất. Trạng thái/từng địa điểm nằm trong PostgreSQL; một thời điểm chạy một đợt. Website có chặn hoặc Google yêu cầu xác minh thì ghi lỗi/dừng, không vượt CAPTCHA. Nếu worker báo `ERR_CONNECTION_CLOSED`, hãy dừng thử lại liên tục và kiểm tra log worker cùng kết nối tới Google. Số lượng là mục tiêu, không bảo đảm đạt đủ. Khu vực được đối chiếu với địa chỉ, không chỉ với tên quán.
 
 MST lấy từ website là **ứng viên chưa xác minh**, không được coi là xác nhận pháp nhân. Email/Facebook/Zalo tìm được được lưu trong nguồn theo trường và sheet nguồn của Excel. Giao diện tập trung form thu thập và bảng kết quả; API CSV/quản lý cũ vẫn giữ để tương thích. Chưa có Google Search riêng, gộp/hoàn tác, lịch tiếp cận, xuất nền hoặc lịch sao lưu tự động.
 
@@ -33,7 +29,9 @@ Mở **http://localhost:5173** và tạo tài khoản đầu tiên. Tên đăng 
 
 Script tự sinh mật khẩu PostgreSQL vào `.env`, giữ nguyên file nếu đã tồn tại. Không sửa mật khẩu sau khi đã tạo volume nếu chưa đổi mật khẩu trong PostgreSQL tương ứng. Không đưa `.env`, bản sao lưu hoặc dữ liệu khách hàng lên Git.
 
-Chỉ web bind `127.0.0.1:5173`; DB/Redis/API không mở cổng ra máy chủ. Bản này dùng HTTP local và cookie phiên HttpOnly/SameSite Strict, chưa dành cho Internet. Khi chuyển lên VPS cần HTTPS và cấu hình bảo mật riêng.
+Chỉ web bind `127.0.0.1:5173`; DB/Redis/API không mở cổng ra máy chủ. Bản này dùng HTTP local và cookie phiên HttpOnly/SameSite Strict, chỉ dành cho máy local. Không mở cổng ứng dụng ra Internet.
+
+Database local dùng volume Docker riêng. Nó không tự đồng bộ với database LeadFinder còn lưu trong PostgreSQL dùng chung trên VPS; cần xuất/nhập dữ liệu riêng nếu muốn chuyển các lead cũ về máy.
 
 ## Dùng thử
 
