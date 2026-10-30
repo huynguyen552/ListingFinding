@@ -1,6 +1,7 @@
 """Google Maps discovery and website enrichment with persistent checkpoints."""
 
 import hashlib
+import logging
 import os
 import re
 import secrets
@@ -19,6 +20,7 @@ from .db import SessionLocal
 from .extraction import extract_website
 from .importing import FIELDS, identity, website
 from .models import (
+    Audit,
     CrawlControl,
     CrawlEntry,
     CrawlJob,
@@ -30,6 +32,41 @@ from .models import (
 )
 
 TERMINAL = {"completed", "completed_with_errors", "failed", "cancelled", "blocked"}
+DISCOVERY_STALL_SECONDS = 45
+DISCOVERY_MAX_SECONDS = 180
+DISCOVERY_POLL_SECONDS = 1
+DISCOVERY_REASONS = {
+    "end_of_list": "Google đã hiển thị thông báo xem hết danh sách của lượt tìm kiếm này.",
+    "direct_place": "Google mở trực tiếp một hồ sơ địa điểm.",
+    "no_results": "Google thông báo không tìm thấy kết quả.",
+    "candidate_limit": "Đã chạm giới hạn ứng viên của lượt tìm kiếm; chưa xác nhận hết kết quả.",
+    "stalled": "Danh sách Maps chưa tải thêm kết quả trong thời gian chờ.",
+    "feed_missing": "Danh sách Maps tạm thời không đọc được.",
+    "time_budget": "Đã hết thời gian tìm kiếm của lượt này; chưa xác nhận hết kết quả.",
+}
+
+FEED_SCRIPT = """() => {
+  const feed = document.querySelector('[role="feed"]');
+  const text = (feed?.innerText || '').replaceAll('’', "'");
+  return {
+    present: !!feed,
+    links: [...(feed?.querySelectorAll('a[href*="/maps/place/"]') || [])].map(e =>
+      ({url:e.href, name:e.getAttribute('aria-label') || e.textContent || ''})),
+    end: text.split(String.fromCharCode(10)).some(line =>
+      /^(?:Bạn đã xem hết danh sách này[.!]?|You've reached the end of the list[.!]?)$/i.test(line.trim())),
+    loading: !!feed?.querySelector('[role="progressbar"], [aria-busy="true"]'),
+    restricted: /chế độ bị hạn chế|limited (?:view|mode)/i.test(document.body?.innerText || '')
+  };
+}"""
+
+SCROLL_SCRIPT = """nudge => {
+  const feed = document.querySelector('[role="feed"]');
+  if (!feed) return false;
+  feed.scrollTop = nudge
+    ? Math.max(0, feed.scrollTop - Math.max(120, feed.clientHeight / 2))
+    : feed.scrollHeight;
+  return true;
+}"""
 
 DETAIL_SCRIPT = """() => {
   const text = sel => document.querySelector(sel)?.getAttribute('aria-label')?.replace(/^[^:]+:\\s*/, '').trim() || '';
@@ -187,7 +224,32 @@ def browser_route(route):
         route.continue_()
 
 
+def finish_discovery(job_id, token, reason, complete, count, started, restricted):
+    details = {
+        "reason": reason,
+        "complete": complete,
+        "candidates": count,
+        "duration_seconds": round(time.monotonic() - started, 1),
+        "restricted": restricted,
+    }
+    with SessionLocal() as db:
+        job = db.scalar(select(CrawlJob).where(CrawlJob.id == job_id).with_for_update())
+        if not job or job.run_token != token or job.status != "running":
+            raise StopCrawl()
+        job.discovery_complete = complete
+        job.heartbeat = now()
+        db.add(
+            Audit(
+                user_id=job.user_id, action="discovery_finished", entity_id=job.id, changes=details
+            )
+        )
+        db.commit()
+    logging.getLogger("leadfinder").info("discovery_finished job=%s details=%s", job_id, details)
+    return complete
+
+
 def discover(page, job_id, token, keyword, area, target):
+    started = time.monotonic()
     tick(job_id, token, "Đang tìm địa điểm trên Google Maps…")
     query = keyword + " tại " + area + " Việt Nam"
     page.goto(
@@ -202,22 +264,26 @@ def discover(page, job_id, token, keyword, area, target):
         check_block(page)
         body = page.locator("body").inner_text(timeout=5000)
         if re.search(r"không tìm thấy|couldn't find|no results", body, re.I):
-            return
+            return finish_discovery(job_id, token, "no_results", True, 0, started, False)
         raise BlockedCrawl(
             "Chưa đọc được kết quả Google Maps. Có thể trang bị giới hạn hoặc thay đổi giao diện."
         ) from None
-    # Maps temporarily hides the feed from the accessibility tree while updating.
-    # Keep using its DOM node and allow slower instances time to finish rendering.
-    feed = page.locator('[role="feed"]')
     seen = set()
-    idle = 0
-    for _ in range(60):
+    last_progress = last_nudge = time.monotonic()
+    had_feed = restricted = False
+    end_confirmations = 0
+    reason, complete = "time_budget", False
+    while time.monotonic() - started < DISCOVERY_MAX_SECONDS:
         tick(job_id, token)
         check_block(page)
-        links = page.locator('a[href*="/maps/place/"]').evaluate_all(
-            "els => els.map(e => ({url:e.href,name:e.getAttribute('aria-label')||e.textContent||''}))"
-        )
-        if not feed.count() and page.locator('[data-item-id="address"]').count():
+        # Read the links and feed state together; Maps can replace/hide the feed
+        # between separate locator calls. Only collect links from the result list.
+        state = page.evaluate(FEED_SCRIPT)
+        had_feed = had_feed or state["present"]
+        restricted = restricted or state["restricted"]
+        links = state["links"]
+        direct_result = False
+        if not had_feed and page.locator('[data-item-id="address"]').count():
             direct = validated_place(page.evaluate(DETAIL_SCRIPT))
             direct_name, direct_address = direct["name"], direct["address"]
             links = [
@@ -235,6 +301,7 @@ def discover(page, job_id, token, keyword, area, target):
                     ),
                 }
             ]
+            direct_result = True
         previous_seen = len(seen)
         with SessionLocal() as db:
             job = db.scalar(select(CrawlJob).where(CrawlJob.id == job_id).with_for_update())
@@ -275,24 +342,32 @@ def discover(page, job_id, token, keyword, area, target):
                 elif existing.state == "pending" and not existing.raw_data and link.get("details"):
                     existing.raw_data = {"values": link["details"], "collected_at": now()}
             db.commit()
-        idle = 0 if len(seen) > previous_seen else idle + 1
-        tick(job_id, token, f"Đã tìm thấy {len(seen)} địa điểm ứng viên…")
-        if len(seen) >= min(target * 3, 200) or idle >= 4 or not feed.count():
+        if len(seen) > previous_seen:
+            last_progress = time.monotonic()
+            end_confirmations = 0
+        tick(job_id, token, f"Đã tìm thấy {len(seen)} ứng viên; đang chờ Maps tải danh sách…")
+        if direct_result:
+            reason, complete = "direct_place", True
             break
-        try:
-            feed.evaluate("el => {el.scrollTop = el.scrollHeight;}", timeout=30000)
-        except BrowserTimeout:
-            check_block(page)
-            tick(job_id, token, "Danh sách Maps phản hồi chậm; đang đọc các địa điểm đã tìm thấy…")
-            # Preserve the unfinished discovery checkpoint. Process saved candidates
-            # first instead of discarding them or claiming the search was exhausted.
-            return False
-        time.sleep(2)
-    with SessionLocal() as db:
-        job = db.get(CrawlJob, job_id)
-        if job.run_token == token:
-            job.discovery_complete = True
-            db.commit()
+        if len(seen) >= min(target * 3, 200):
+            reason, complete = "candidate_limit", True
+            break
+        end_confirmations = end_confirmations + 1 if state["end"] and not state["loading"] else 0
+        if end_confirmations >= 2:
+            reason, complete = "end_of_list", True
+            break
+        current = time.monotonic()
+        if current - last_progress >= DISCOVERY_STALL_SECONDS:
+            reason = "stalled" if state["present"] else "feed_missing"
+            break
+        # A small up/down movement retries ordinary lazy-loading without keeping
+        # an unbounded browser session alive. Never treat a missing feed as EOF.
+        nudge = current - last_progress >= 10 and current - last_nudge >= 10
+        if nudge:
+            last_nudge = current
+        page.evaluate(SCROLL_SCRIPT, nudge)
+        time.sleep(DISCOVERY_POLL_SECONDS)
+    return finish_discovery(job_id, token, reason, complete, len(seen), started, restricted)
 
 
 def read_place(page, url):
@@ -556,13 +631,26 @@ def run_crawl(job_id):
                 .select_from(CrawlEntry)
                 .where(CrawlEntry.job_id == job_id, CrawlEntry.state == "failed")
             )
+            discovery_log = db.scalar(
+                select(Audit)
+                .where(Audit.entity_id == job_id, Audit.action == "discovery_finished")
+                .order_by(Audit.created_at.desc(), Audit.id.desc())
+                .limit(1)
+            )
+            discovery_details = discovery_log.changes if discovery_log else {}
+        search_message = DISCOVERY_REASONS.get(
+            discovery_details.get("reason"),
+            "Đã xử lý các ứng viên đã tìm thấy; chưa xác nhận đã hết kết quả Google.",
+        )
+        if discovery_details.get("restricted"):
+            search_message += " Google đang hiển thị Maps ở chế độ bị hạn chế."
         if discovery_incomplete and count < target:
             finish(
                 job_id,
                 token,
                 "paused",
-                f"Đã lưu {count}/{target} địa điểm. Danh sách Maps phản hồi chậm; "
-                "đã giữ kết quả. Bấm Tiếp tục để tìm và đọc phần còn lại.",
+                f"Đã lưu {count}/{target} địa điểm. {search_message} "
+                "Đã giữ kết quả. Bấm Tiếp tục để tìm và đọc phần còn lại.",
             )
             return
         finish(
@@ -573,7 +661,7 @@ def run_crawl(job_id):
             + (
                 "Đã đạt số lượng mục tiêu."
                 if count >= target
-                else "Đã hết kết quả đọc được phù hợp; không bảo đảm tìm đủ mục tiêu."
+                else search_message + " Không bảo đảm tìm đủ mục tiêu."
             ),
         )
     except StopCrawl:

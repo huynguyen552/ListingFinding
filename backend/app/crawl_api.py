@@ -115,8 +115,15 @@ def job_detail(job_id: str, user=Depends(current_user), db: Session = Depends(ge
     from .main import display_sources, location_view
 
     allowed = display_sources(db)
+    discovery_log = db.scalar(
+        select(Audit)
+        .where(Audit.entity_id == job.id, Audit.action == "discovery_finished")
+        .order_by(Audit.created_at.desc(), Audit.id.desc())
+        .limit(1)
+    )
     return {
         **job_view(db, job),
+        "discovery": discovery_log.changes if discovery_log else None,
         "entries": [
             {
                 "id": entry.id,

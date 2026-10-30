@@ -57,3 +57,11 @@ Ngày 30/10/2026, sau yêu cầu kiểm tra tiếp, đã manual deploy `e46cb94`
 Render auto-deploy commit `5fef11b` thành công lúc 11:12 ngày 30/10/2026, giữ nguyên gói Free. Tiếp tục chính đợt coffee đã thất bại: xử lý đủ 13 ứng viên, lưu **4 quán** khớp Tây Thạnh, bỏ qua **9 quán** khác khu vực, không có hồ sơ lỗi. Tác vụ kết thúc `completed` lúc khoảng 11:18, không bị ngắt trong lượt này; readiness trả HTTP 200. Không đạt mục tiêu 100 do không có thêm kết quả đọc được phù hợp trong lượt tìm kiếm này. Không đổi mục tiêu hoặc nới bộ lọc để tăng số lượng.
 
 Render Free không cung cấp biểu đồ bộ nhớ ứng dụng, nên không có số đo RAM đỉnh thực tế trên cloud. Kết quả này xác nhận đợt trên đã hoàn tất sau sửa lỗi, không bảo đảm mọi truy vấn đều vừa 512 MB.
+
+## Kết quả khác nhau giữa local và VPS
+
+Nguyên nhân trong worker là bộ tìm kiếm cũ coi bốn lần cuộn liên tiếp không có địa điểm mới (khoảng 8 giây) là đã hết kết quả, dù không kiểm tra thông báo hết danh sách của Google Maps. Maps có thể dừng tải lâu hơn rồi mới thêm địa điểm, nên local và VPS có thể lưu số lượng khác nhau.
+
+Worker hiện kiểm tra riêng thông báo hết danh sách, đợi tối đa 45 giây khi danh sách không tiến triển, thử cuộn lại để kích hoạt tải lười và giới hạn tổng thời gian tìm kiếm ở 180 giây. Nếu không xác nhận được đã hết danh sách, thông tin này được lưu vào audit và trạng thái đợt; tác vụ sẽ giữ kết quả đã có và tạm dừng khi chưa đạt mục tiêu. Không có migration database.
+
+Đã quan sát trực tiếp giao diện Maps cho truy vấn `quán ăn tại đường Lê Trọng Tấn, quận Tân Phú, thành phố Hồ Chí Minh Việt Nam`: số liên kết tăng 7 → 14 → 20, đứng ở 20 qua hai nhịp cuộn, sau đó tăng lên 23 và hiển thị thông báo hết danh sách. Giao diện đồng thời báo đang ở chế độ bị hạn chế. Vì Google có thể trả snapshot khác theo thời điểm, máy chủ và trạng thái giới hạn, sửa lỗi này tránh dừng sớm nhưng không bảo đảm hai lượt tìm kiếm riêng biệt có dữ liệu hoàn toàn giống nhau.
