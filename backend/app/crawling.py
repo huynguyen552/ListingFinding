@@ -206,7 +206,9 @@ def discover(page, job_id, token, keyword, area, target):
         raise BlockedCrawl(
             "Chưa đọc được kết quả Google Maps. Có thể trang bị giới hạn hoặc thay đổi giao diện."
         ) from None
-    feed = page.get_by_role("feed")
+    # Maps temporarily hides the feed from the accessibility tree while updating.
+    # Keep using its DOM node and allow slower instances time to finish rendering.
+    feed = page.locator('[role="feed"]')
     seen = set()
     idle = 0
     for _ in range(60):
@@ -277,7 +279,14 @@ def discover(page, job_id, token, keyword, area, target):
         tick(job_id, token, f"Đã tìm thấy {len(seen)} địa điểm ứng viên…")
         if len(seen) >= min(target * 3, 200) or idle >= 4 or not feed.count():
             break
-        feed.evaluate("el => {el.scrollTop = el.scrollHeight;}")
+        try:
+            feed.evaluate("el => {el.scrollTop = el.scrollHeight;}", timeout=30000)
+        except BrowserTimeout:
+            check_block(page)
+            tick(job_id, token, "Danh sách Maps phản hồi chậm; đang đọc các địa điểm đã tìm thấy…")
+            # Preserve the unfinished discovery checkpoint. Process saved candidates
+            # first instead of discarding them or claiming the search was exhausted.
+            return False
         time.sleep(2)
     with SessionLocal() as db:
         job = db.get(CrawlJob, job_id)
@@ -437,11 +446,14 @@ def run_crawl(job_id):
         db.commit()
     robots_cache = {}
     area_matcher = AreaMatcher(area)
+    discovery_incomplete = False
     try:
         with MapBrowser() as maps:
             if not discovery_complete:
                 try:
-                    discover(maps.page(), job_id, token, keyword, area, target)
+                    discovery_incomplete = (
+                        discover(maps.page(), job_id, token, keyword, area, target) is False
+                    )
                 finally:
                     maps.close()
             while True:
@@ -544,6 +556,15 @@ def run_crawl(job_id):
                 .select_from(CrawlEntry)
                 .where(CrawlEntry.job_id == job_id, CrawlEntry.state == "failed")
             )
+        if discovery_incomplete and count < target:
+            finish(
+                job_id,
+                token,
+                "paused",
+                f"Đã lưu {count}/{target} địa điểm. Danh sách Maps phản hồi chậm; "
+                "đã giữ kết quả. Bấm Tiếp tục để tìm và đọc phần còn lại.",
+            )
+            return
         finish(
             job_id,
             token,

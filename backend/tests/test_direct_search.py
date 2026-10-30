@@ -1,5 +1,6 @@
 """Regression: Maps can open a place while retaining /maps/search/ in the URL."""
 
+import pytest
 from sqlalchemy import select
 
 from app.crawling import discover, place_key
@@ -90,7 +91,7 @@ def test_resume_discovery_scrolls_past_already_saved_candidates(auth, monkeypatc
         def count(self):
             return 1
 
-        def evaluate(self, script):
+        def evaluate(self, script, **kwargs):
             page.index += 1
 
     class Links(Element):
@@ -104,6 +105,8 @@ def test_resume_discovery_scrolls_past_already_saved_candidates(auth, monkeypatc
             return Feed("feed")
 
         def locator(self, selector):
+            if selector == '[role="feed"]':
+                return Feed("feed")
             if selector == 'a[href*="/maps/place/"]':
                 return Links("links")
             return super().locator(selector)
@@ -128,3 +131,70 @@ def test_resume_discovery_scrolls_past_already_saved_candidates(auth, monkeypatc
     discover(page, job_id, "token", "quán ăn", "Đà Nẵng", 3)
     with SessionLocal() as db:
         assert len(db.scalars(select(CrawlEntry).where(CrawlEntry.job_id == job_id)).all()) == 8
+
+
+@pytest.mark.parametrize(
+    "target,blocked,expected", [(1, False, "completed"), (2, False, "paused"), (2, True, "blocked")]
+)
+def test_slow_feed_processes_saved_candidates_without_claiming_search_complete(
+    auth, monkeypatch, target, blocked, expected
+):
+    from app import crawling
+
+    class Feed(Element):
+        def count(self):
+            return 1
+
+        def evaluate(self, script, **kwargs):
+            assert kwargs["timeout"] == 30000
+            page.blocked = blocked
+            raise crawling.BrowserTimeout("Maps feed temporarily unavailable")
+
+    class Links(Element):
+        def evaluate_all(self, script):
+            return [{"url": "https://www.google.com/maps/place/fixture", "name": "Quán thử"}]
+
+    class SlowPage(DirectSearchPage):
+        blocked = False
+
+        def locator(self, selector):
+            if selector == '[role="feed"]':
+                return Feed("feed")
+            if selector == 'a[href*="/maps/place/"]':
+                return Links("links")
+            return super().locator(selector)
+
+    page = SlowPage()
+
+    def check_block(page):
+        if page.blocked:
+            raise crawling.BlockedCrawl("Google yêu cầu CAPTCHA")
+
+    monkeypatch.setattr(crawling, "check_block", check_block)
+    monkeypatch.setattr(crawling.MapBrowser, "page", lambda self: page)
+    monkeypatch.setattr(crawling.MapBrowser, "read", lambda self, url: page.evaluate(None))
+    monkeypatch.setattr(crawling.time, "sleep", lambda *a: None)
+    with SessionLocal() as db:
+        job = CrawlJob(
+            user_id=1,
+            request_key="slow-feed-regression",
+            keyword="quán ăn",
+            area="Đà Nẵng",
+            target=target,
+            status="queued",
+            enrich_website=False,
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+    crawling.run_crawl(job_id)
+    with SessionLocal() as db:
+        job = db.get(CrawlJob, job_id)
+        entry = db.scalar(select(CrawlEntry).where(CrawlEntry.job_id == job_id))
+        assert job.status == expected
+        assert not job.discovery_complete
+        assert entry.state == ("pending" if blocked else "done")
+        if not blocked:
+            assert entry.raw_data["values"]["phone"] == "0901234567"
+        if expected == "paused":
+            assert "Tiếp tục" in job.message

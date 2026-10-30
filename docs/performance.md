@@ -41,4 +41,13 @@ Khi người dùng báo Render vẫn bị ngắt, đã kiểm tra và xác nhậ
 
 Ngày 30/10/2026, sau yêu cầu kiểm tra tiếp, đã manual deploy `e46cb94` trên cùng gói Free, giữ nguyên PostgreSQL và tài khoản. Tiếp tục đợt `quán ăn / tân phú` từ 3/5: lưu thêm 2 hồ sơ, hoàn thành **5/5**, giữ nguyên ba kết quả cũ; không quan sát thấy ngắt trong lượt tiếp tục này. Readiness trả HTTP 200 sau khi chạy.
 
-Đây là xác nhận một đợt tiếp tục nhỏ đã hoàn tất trên Render Free, không phải bảo đảm mọi đợt mới hoặc mục tiêu 100 địa điểm đều vừa 512 MB. Đợt `coffee / phường Tây Thạnh, Hồ Chí Minh` mục tiêu 100 do người dùng tạo sau đó vẫn đang chạy tại thời điểm kiểm tra.
+Đây là xác nhận một đợt tiếp tục nhỏ đã hoàn tất trên Render Free, không phải bảo đảm mọi đợt mới hoặc mục tiêu 100 địa điểm đều vừa 512 MB.
+
+## Lỗi chờ danh sách Maps sau khi tối ưu RAM
+
+Đợt `coffee / phường Tây Thạnh, Hồ Chí Minh` mục tiêu 100 sau đó tìm được 13 ứng viên nhưng thất bại hai lần lúc 11:03 và 11:04 ngày 30/10/2026. Application logs ghi `Locator.evaluate: Timeout 5000ms exceeded`, chờ `get_by_role("feed")` tại bước cuộn danh sách. Đây là lỗi timeout đã xác nhận; không có căn cứ quy hai lần lỗi này cho OOM.
+
+- Đổi sang locator DOM `[role="feed"]` để không phụ thuộc feed đang được công bố trong accessibility tree khi Maps cập nhật trang; cho thao tác cuộn tối đa 30 giây.
+- Nếu vẫn timeout, kiểm tra chặn/xác minh và trạng thái tạm dừng/hủy trước, đóng trình duyệt tìm kiếm, rồi đọc những ứng viên đã lưu. Không đánh dấu tìm kiếm hoàn tất.
+- Nếu chưa đạt mục tiêu sau phần ứng viên đó, báo tạm dừng với lý do danh sách phản hồi chậm và cho tiếp tục. Không báo đã hết kết quả.
+- 118 kiểm thử backend qua trên SQLite; 10 ca hồi quy cache/browser/discovery qua trên PostgreSQL riêng trong image mới. Bao gồm timeout sau khi lưu ứng viên, giữ điện thoại, đạt mục tiêu, chưa đạt mục tiêu và Google yêu cầu xác minh.
