@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { createRequestKey } from "./requestKey";
 import { Button } from "./Button";
 import { Loader2, Download, Search, Pause, Play, X } from "lucide-react";
 
@@ -75,7 +76,8 @@ export function CrawlTool({
     [message, setMessage] = useState(""),
     [showIssues, setShowIssues] = useState(false),
     [evidence, setEvidence] = useState<any>(null);
-  const requestKey = useRef(crypto.randomUUID());
+  const requestKey = useRef("");
+  if (!requestKey.current) requestKey.current = createRequestKey();
   const active = jobs.some((j) => activeStates.includes(j.status));
   useEffect(() => {
     let alive = true;
@@ -128,7 +130,7 @@ export function CrawlTool({
           request_key: requestKey.current,
         }),
       });
-      requestKey.current = crypto.randomUUID();
+      requestKey.current = createRequestKey();
       setSelected(created.id);
       setJob({ ...created, entries: [] });
       setAllData(false);
