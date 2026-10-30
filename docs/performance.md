@@ -34,3 +34,11 @@ Các phép đo trên là từng lượt nhỏ trên local, không phải bảo �
 - Ruff check/format và Docker build qua. Hai lượt thu thập thực của bản mới đều đạt mục tiêu.
 
 Các tối ưu này được kiểm tra ở local. Giữ nguyên quyết định dừng cào trên Render Free; không tự chạy lại hoặc nâng gói Render trong bước tối ưu này.
+
+## Xác nhận bản thực sự chạy trên Render
+
+Khi người dùng báo Render vẫn bị ngắt, đã kiểm tra và xác nhận dịch vụ vẫn chạy commit `8b241e7`; commit tối ưu `e46cb94` bị bỏ qua auto-deploy vì có nhãn `[skip render]` theo quyết định dừng cào ở bước trước.
+
+Ngày 30/10/2026, sau yêu cầu kiểm tra tiếp, đã manual deploy `e46cb94` trên cùng gói Free, giữ nguyên PostgreSQL và tài khoản. Tiếp tục đợt `quán ăn / tân phú` từ 3/5: lưu thêm 2 hồ sơ, hoàn thành **5/5**, giữ nguyên ba kết quả cũ; không quan sát thấy ngắt trong lượt tiếp tục này. Readiness trả HTTP 200 sau khi chạy.
+
+Đây là xác nhận một đợt tiếp tục nhỏ đã hoàn tất trên Render Free, không phải bảo đảm mọi đợt mới hoặc mục tiêu 100 địa điểm đều vừa 512 MB. Đợt `coffee / phường Tây Thạnh, Hồ Chí Minh` mục tiêu 100 do người dùng tạo sau đó vẫn đang chạy tại thời điểm kiểm tra.
