@@ -47,3 +47,11 @@ Tài liệu nguồn: [Render Free](https://render.com/docs/free), [Docker](https
 - `.dockerignore`, `.gitignore`: loại secrets, tài liệu riêng, môi trường local, bản sao lưu và build artifacts.
 
 Docker Compose local vẫn dùng cấu hình riêng ở `compose.yaml`.
+
+## Kiểm tra bản triển khai ngày 30/10/2026
+
+- 108 kiểm thử qua trên SQLite. Docker image gộp chạy trên PostgreSQL test riêng: 107 qua, 1 ca chỉ kiểm tra đường dẫn source của runtime được bỏ qua trong image; runtime thực được kiểm tra bằng khởi động container.
+- Dockerfile gốc build thành công; `render.yaml` hợp lệ theo JSON Schema chính thức của Render.
+- Container thử giới hạn 512 MiB RAM và 0.1 CPU khởi động, chạy migration, bootstrap quản trị viên, trả readiness và đăng nhập thành công.
+- Lượt thực tế tìm `Mộc quán Seafood`, Đà Nẵng, mục tiêu 1, không đọc thêm website: completed, lưu 1 địa điểm thật. Dữ liệu thử ở DB riêng, không đưa vào database local chính hoặc repo.
+- Bộ nhớ quan sát khi chờ khoảng 256 MiB; một lần quan sát khi đang đọc Maps khoảng 509 MiB, container không bị OOM trong lượt này. Đây không phải bảo đảm mọi lượt đều vừa 512 MiB; nên theo dõi và nâng compute nếu thường xuyên hết bộ nhớ.
