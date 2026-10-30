@@ -8,30 +8,49 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: leadfinder-nightly
   cancel-in-progress: false
 
 jobs:
-  crawl-and-email:
+  collect-and-deliver:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
-      - name: Validate mail configuration
+      - name: Check delivery channels
+        id: channels
         shell: bash
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: |
-          for name in SMTP_HOST SMTP_USERNAME SMTP_PASSWORD MAIL_TO; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::$name is required in repository Actions Secrets."
-              exit 1
-            fi
-          done
+          email_ready=false
+          if [[ -n "${SMTP_HOST:-}" && -n "${SMTP_USERNAME:-}" && -n "${SMTP_PASSWORD:-}" && -n "${MAIL_TO:-}" ]]; then
+            email_ready=true
+          else
+            echo "::warning::Email is not fully configured; the Sheets channel will still run if configured."
+          fi
+
+          sheets_ready=false
+          if [[ -n "${GOOGLE_SHEET_ID:-}" && -n "${GOOGLE_WORKLOAD_IDENTITY_PROVIDER:-}" && -n "${GOOGLE_SERVICE_ACCOUNT:-}" ]]; then
+            sheets_ready=true
+          else
+            echo "::warning::Google Sheets is not fully configured; the email channel will still run if configured."
+          fi
+
+          echo "email_ready=$email_ready" >> "$GITHUB_OUTPUT"
+          echo "sheets_ready=$sheets_ready" >> "$GITHUB_OUTPUT"
+          if [[ "$email_ready" != true && "$sheets_ready" != true ]]; then
+            echo "::error::Configure at least one complete delivery channel before starting a crawl."
+            exit 1
+          fi
 
       - name: Checkout default branch
         uses: actions/checkout@v4
@@ -54,7 +73,11 @@ jobs:
           python scripts/manage.py init
           python scripts/manage.py start
 
-      - name: Collect from CSV and email Excel
+      - name: Collect from CSV and create Excel
+        run: python scripts/run_nightly_batch.py
+
+      - name: Send Excel by email
+        if: always() && steps.channels.outputs.email_ready == 'true' && hashFiles('action-results/leadfinder-nightly.xlsx') != ''
         env:
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -62,7 +85,24 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python scripts/run_nightly_batch.py
+        run: python scripts/deliver_email.py
+
+      - name: Authenticate to Google Sheets
+        id: google_auth
+        if: always() && steps.channels.outputs.sheets_ready == 'true' && hashFiles('action-results/leadfinder-nightly.xlsx') != ''
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets
+
+      - name: Append results to Google Sheets
+        if: always() && steps.google_auth.outcome == 'success' && hashFiles('action-results/leadfinder-nightly.xlsx') != ''
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google_auth.outputs.access_token }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+        run: python scripts/publish_to_sheets.py
 
       - name: Keep a short-lived download copy
         if: always()

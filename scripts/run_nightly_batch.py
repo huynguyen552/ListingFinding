@@ -1,4 +1,4 @@
-"""Run CSV-defined crawl jobs through the local Compose app and email one workbook."""
+"""Run CSV-defined crawl jobs through the local Compose app and create one workbook."""
 
 import argparse
 import csv
@@ -6,17 +6,13 @@ import io
 import json
 import os
 import secrets
-import smtplib
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime
-from email.message import EmailMessage
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook, load_workbook
 
@@ -240,79 +236,6 @@ def append_job_detail(workbook, api, query, job_id):
     return detail
 
 
-def mail_settings():
-    required = ["SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "MAIL_TO"]
-    missing = [name for name in required if not os.getenv(name, "").strip()]
-    if missing:
-        raise RuntimeError("Chưa cấu hình GitHub Actions Secrets: " + ", ".join(missing))
-    recipients = [
-        address.strip()
-        for address in os.environ["MAIL_TO"].replace(";", ",").split(",")
-        if address.strip()
-    ]
-    if not recipients:
-        raise RuntimeError("MAIL_TO chưa có địa chỉ email nhận kết quả.")
-    port = int(os.getenv("SMTP_PORT", "").strip() or "587")
-    if not 1 <= port <= 65535:
-        raise RuntimeError("SMTP_PORT phải nằm trong khoảng 1–65535.")
-    return {
-        "host": os.environ["SMTP_HOST"].strip(),
-        "port": port,
-        "username": os.environ["SMTP_USERNAME"],
-        "password": os.environ["SMTP_PASSWORD"],
-        "sender": os.getenv("MAIL_FROM", "").strip() or os.environ["SMTP_USERNAME"],
-        "recipients": recipients,
-    }
-
-
-def send_mail(settings, file_path, summaries):
-    local_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
-    message = EmailMessage()
-    message["Subject"] = f"LeadFinder — kết quả thu thập {local_time:%d/%m/%Y}"
-    message["From"] = settings["sender"]
-    message["To"] = ", ".join(settings["recipients"])
-    lines = ["Kết quả thu thập tự động của LeadFinder:", ""]
-    for item in summaries:
-        lines.append(
-            f"- {item['keyword']} · {item['area']}: {item['status']}; "
-            f"đã lưu {item.get('saved', 0)}/{item['target']}; "
-            f"tìm thấy {item.get('found', 0)}; bỏ qua {item.get('skipped', 0)}; "
-            f"lỗi {item.get('failed', 0)}; cảnh báo website {item.get('warnings', 0)}."
-        )
-        if item.get("message"):
-            lines.append(f"  {item['message']}")
-    lines.extend(["", "File Excel tổng hợp được đính kèm."])
-    message.set_content("\n".join(lines))
-
-    attachment = file_path.read_bytes()
-    if len(attachment) <= 18 * 1024 * 1024:
-        message.add_attachment(
-            attachment,
-            maintype="application",
-            subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=file_path.name,
-        )
-    else:
-        run_url = os.getenv("GITHUB_SERVER_URL", "https://github.com") + "/"
-        run_url += os.getenv("GITHUB_REPOSITORY", "") + "/actions/runs/"
-        run_url += os.getenv("GITHUB_RUN_ID", "")
-        message.set_content(
-            "\n".join(lines[:-1] + ["File vượt giới hạn đính kèm email; tải tại:", run_url])
-        )
-
-    if settings["port"] == 465:
-        with smtplib.SMTP_SSL(settings["host"], settings["port"], timeout=30) as client:
-            client.login(settings["username"], settings["password"])
-            client.send_message(message)
-    else:
-        with smtplib.SMTP(settings["host"], settings["port"], timeout=30) as client:
-            client.ehlo()
-            client.starttls()
-            client.ehlo()
-            client.login(settings["username"], settings["password"])
-            client.send_message(message)
-
-
 def save_workbook(workbook, path):
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
@@ -331,7 +254,6 @@ def save_workbook(workbook, path):
 
 
 def run(args):
-    mail = mail_settings()
     queries = read_queries(args.input)
     api = LeadFinderAPI(os.getenv("LEADFINDER_BASE_URL", "http://127.0.0.1:5173"))
     workbook = Workbook()
@@ -371,7 +293,6 @@ def run(args):
             "Thông tin công khai không tự cấp quyền tái sử dụng; cần tuân thủ điều khoản của nguồn dữ liệu.",
         ]
     )
-    summaries = []
     had_failure = False
     try:
         wait_for_api(api)
@@ -383,23 +304,8 @@ def run(args):
             summary.append(
                 [query.keyword, query.area, query.target, "Lỗi khởi động", 0, 0, 0, 1, 0, message]
             )
-            summaries.append(
-                {
-                    "keyword": query.keyword,
-                    "area": query.area,
-                    "target": query.target,
-                    "status": "Lỗi khởi động",
-                    "found": 0,
-                    "saved": 0,
-                    "skipped": 0,
-                    "failed": 1,
-                    "warnings": 0,
-                    "message": message,
-                }
-            )
         save_workbook(workbook, args.output)
-        send_mail(mail, args.output, summaries)
-        print(f"Đã gửi email báo lỗi khởi động; workbook: {args.output}", flush=True)
+        print(f"Đã tạo workbook báo lỗi khởi động: {args.output}", flush=True)
         return 1
 
     batch_deadline = time.monotonic() + int(os.getenv("BATCH_TIMEOUT_SECONDS", "17000"))
@@ -438,7 +344,6 @@ def run(args):
                 "warnings": job.get("warnings", 0),
                 "message": message,
             }
-            summaries.append(outcome)
             summary.append(
                 [
                     outcome["keyword"],
@@ -517,20 +422,6 @@ def run(args):
                     message,
                 ]
             )
-            summaries.append(
-                {
-                    "keyword": query.keyword,
-                    "area": query.area,
-                    "target": query.target,
-                    "status": status,
-                    "found": found,
-                    "saved": saved,
-                    "skipped": skipped,
-                    "failed": failed,
-                    "warnings": warnings,
-                    "message": message,
-                }
-            )
             workbook["Thông báo"].append([query.keyword, query.area, "", "workflow_error", message])
             for pending in queries[index:]:
                 summary.append(
@@ -551,8 +442,6 @@ def run(args):
 
     save_workbook(workbook, args.output)
     print(f"Đã tạo workbook: {args.output}", flush=True)
-    send_mail(mail, args.output, summaries)
-    print("Đã gửi email kết quả.", flush=True)
     if had_failure:
         return 1
     return 0
@@ -575,9 +464,8 @@ def main():
     args = parser.parse_args()
     try:
         if args.validate_only:
-            mail_settings()
             queries = read_queries(args.input)
-            print(f"Cấu hình hợp lệ; có {len(queries)} truy vấn đang bật.")
+            print(f"CSV hợp lệ; có {len(queries)} truy vấn đang bật.")
             return 0
         return run(args)
     except Exception as exc:

@@ -1,6 +1,6 @@
 # LeadFinder
 
-LeadFinder là ứng dụng tiếng Việt để thu thập và quản lý thông tin khách hàng tiềm năng cho quán ăn, nhà hàng. Giao diện quản lý chạy local bằng Docker Compose. Thu thập tự động theo lịch chạy bằng GitHub Actions, đọc danh sách từ `automation/targets.csv` và gửi workbook Excel qua email. Dữ liệu PostgreSQL cũ trên VPS chưa được chuyển sang máy local.
+LeadFinder là ứng dụng tiếng Việt để thu thập và quản lý thông tin khách hàng tiềm năng cho quán ăn, nhà hàng. Giao diện quản lý chạy local bằng Docker Compose. Thu thập tự động theo lịch chạy bằng GitHub Actions, đọc danh sách từ `automation/targets.csv`, gửi workbook Excel qua email và ghi kết quả vào Google Sheets. Dữ liệu PostgreSQL cũ trên VPS chưa được chuyển sang máy local.
 
 Ứng dụng đọc kết quả Google Maps bằng Chromium. Maps có thể thay đổi kết quả, giới hạn truy cập hoặc đóng kết nối tới một số máy chủ; số lượng và kết quả giữa các lượt chạy không được bảo đảm giống nhau. Xem [số đo hiệu năng và các giới hạn đã kiểm tra](docs/performance.md).
 
@@ -33,9 +33,9 @@ Chỉ web bind `127.0.0.1:5173`; DB/Redis/API không mở cổng ra máy chủ. 
 
 Database local dùng volume Docker riêng. Nó không tự đồng bộ với database LeadFinder còn lưu trong PostgreSQL dùng chung trên VPS; cần xuất/nhập dữ liệu riêng nếu muốn chuyển các lead cũ về máy.
 
-## Thu thập tự động và gửi Excel qua email
+## Thu thập tự động, email và Google Sheets
 
-GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Workflow tạo một database tạm, xử lý tuần tự các dòng đang bật trong `automation/targets.csv`, tổng hợp kết quả thành một file `.xlsx`, rồi gửi email. File kết quả cũng được giữ trong GitHub Actions 7 ngày để tải lại khi email gặp sự cố. Các lượt này không tự thêm dữ liệu vào database local.
+GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Workflow tạo một database tạm, xử lý tuần tự các dòng đang bật trong `automation/targets.csv`, rồi tạo một file `.xlsx`. Sau đó, workflow độc lập thử gửi email và ghi dữ liệu vào Google Sheets; lỗi ở một kênh không ngăn thử kênh còn lại. File Excel được giữ trong GitHub Actions 7 ngày làm bản dự phòng. Các lượt này không tự thêm dữ liệu vào database local.
 
 Mở `automation/targets.csv` bằng Excel để chỉnh các cột:
 
@@ -49,9 +49,13 @@ Mở `automation/targets.csv` bằng Excel để chỉnh các cột:
 
 Lưu CSV UTF-8, commit và push lên nhánh mặc định của repo trước giờ chạy. Mẫu hiện đang tắt để tránh một lượt cào bất ngờ; đổi `enabled` thành `true` cho các dòng cần chạy. Một lần tối đa 25 dòng. Nếu Google chặn hoặc kết nối lỗi, workflow dừng các truy vấn còn lại, gửi phần kết quả đã có và ghi trạng thái vào workbook.
 
-Trước khi dùng lịch mỗi tối, cần thêm các GitHub Actions Secrets vào repo: `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_TO`; `SMTP_PORT` mặc định là `587` và `MAIL_FROM` mặc định dùng tài khoản SMTP. `MAIL_TO` có thể chứa nhiều địa chỉ, ngăn cách bằng dấu phẩy. Không đặt mật khẩu email trong CSV hoặc commit vào repo. Chạy workflow thủ công lần đầu với một dòng nhỏ để xác nhận Google Maps và email hoạt động.
+Để gửi email, thêm Actions Secrets: `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_TO`; `SMTP_PORT` mặc định là `587` và `MAIL_FROM` mặc định dùng tài khoản SMTP. `MAIL_TO` có thể chứa nhiều địa chỉ, ngăn cách bằng dấu phẩy.
 
-Runner của GitHub là máy cloud tạm thời; Google Maps có thể giới hạn hoặc đóng kết nối từ runner. Lịch workflow cũng có thể bắt đầu trễ khi GitHub quá tải. Actions chỉ gửi file; muốn xem dữ liệu trong giao diện local thì cần nhập workbook riêng.
+Để ghi Google Sheets, bật Google Sheets API trong Google Cloud, cấu hình Workload Identity Federation cho repo này và chia sẻ spreadsheet với email tài khoản dịch vụ quyền **Editor**. Thêm các Secrets `GOOGLE_SHEET_ID`, `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` (tên đầy đủ của provider) và `GOOGLE_SERVICE_ACCOUNT` (email tài khoản dịch vụ). Workflow tự tạo các tab `Runs`, `Leads`, `Sources` và `Notifications`, sau đó nối thêm dòng của mỗi lượt chạy. Nên giới hạn provider chỉ tin cậy repo `huynguyen552/ListingFinding`. Xem [hướng dẫn thiết lập chi tiết](docs/github-actions-google-sheets.md), [Google Cloud WIF](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines) và [Google Sheets API append](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/append).
+
+Cần cấu hình đầy đủ ít nhất một kênh trước khi chạy; nếu email hoặc Sheets thiếu cấu hình, kênh còn lại vẫn được chạy. Không đưa mật khẩu email, access token hoặc khóa tài khoản dịch vụ vào CSV hay commit. Chạy workflow thủ công lần đầu với một dòng nhỏ để xác nhận quyền truy cập, Google Maps và nơi nhận dữ liệu.
+
+Runner của GitHub là máy cloud tạm thời; Google Maps có thể giới hạn hoặc đóng kết nối từ runner. Lịch workflow cũng có thể bắt đầu trễ khi GitHub quá tải. Google Sheets lưu dữ liệu qua các lần chạy; các địa điểm có thể lặp lại giữa những đợt thu thập. Muốn xem dữ liệu trong giao diện local thì cần nhập workbook riêng.
 
 ## Dùng thử
 
