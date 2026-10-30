@@ -1,0 +1,79 @@
+name: LeadFinder nightly collection
+
+on:
+  schedule:
+    - cron: "17 23 * * *"
+      timezone: "Asia/Ho_Chi_Minh"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leadfinder-nightly
+  cancel-in-progress: false
+
+jobs:
+  crawl-and-email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Validate mail configuration
+        shell: bash
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          for name in SMTP_HOST SMTP_USERNAME SMTP_PASSWORD MAIL_TO; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::$name is required in repository Actions Secrets."
+              exit 1
+            fi
+          done
+
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install workbook dependency
+        run: python -m pip install --disable-pip-version-check openpyxl==3.1.5
+
+      - name: Validate CSV before starting services
+        run: python scripts/run_nightly_batch.py --validate-only
+
+      - name: Start temporary LeadFinder stack
+        run: |
+          python scripts/manage.py init
+          python scripts/manage.py start
+
+      - name: Collect from CSV and email Excel
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python scripts/run_nightly_batch.py
+
+      - name: Keep a short-lived download copy
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: leadfinder-results-${{ github.run_number }}
+          path: action-results/*.xlsx
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop temporary services
+        if: always()
+        continue-on-error: true
+        run: docker compose down --remove-orphans

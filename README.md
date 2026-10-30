@@ -1,6 +1,6 @@
 # LeadFinder
 
-LeadFinder là ứng dụng tiếng Việt để thu thập và quản lý thông tin khách hàng tiềm năng cho quán ăn, nhà hàng. Bản hiện tại được dùng trên máy local bằng Docker Compose; không còn triển khai LeadFinder trên VPS. Dữ liệu PostgreSQL cũ trên VPS chưa được chuyển sang máy local.
+LeadFinder là ứng dụng tiếng Việt để thu thập và quản lý thông tin khách hàng tiềm năng cho quán ăn, nhà hàng. Giao diện quản lý chạy local bằng Docker Compose. Thu thập tự động theo lịch chạy bằng GitHub Actions, đọc danh sách từ `automation/targets.csv` và gửi workbook Excel qua email. Dữ liệu PostgreSQL cũ trên VPS chưa được chuyển sang máy local.
 
 Ứng dụng đọc kết quả Google Maps bằng Chromium. Maps có thể thay đổi kết quả, giới hạn truy cập hoặc đóng kết nối tới một số máy chủ; số lượng và kết quả giữa các lượt chạy không được bảo đảm giống nhau. Xem [số đo hiệu năng và các giới hạn đã kiểm tra](docs/performance.md).
 
@@ -32,6 +32,26 @@ Script tự sinh mật khẩu PostgreSQL vào `.env`, giữ nguyên file nếu �
 Chỉ web bind `127.0.0.1:5173`; DB/Redis/API không mở cổng ra máy chủ. Bản này dùng HTTP local và cookie phiên HttpOnly/SameSite Strict, chỉ dành cho máy local. Không mở cổng ứng dụng ra Internet.
 
 Database local dùng volume Docker riêng. Nó không tự đồng bộ với database LeadFinder còn lưu trong PostgreSQL dùng chung trên VPS; cần xuất/nhập dữ liệu riêng nếu muốn chuyển các lead cũ về máy.
+
+## Thu thập tự động và gửi Excel qua email
+
+GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Workflow tạo một database tạm, xử lý tuần tự các dòng đang bật trong `automation/targets.csv`, tổng hợp kết quả thành một file `.xlsx`, rồi gửi email. File kết quả cũng được giữ trong GitHub Actions 7 ngày để tải lại khi email gặp sự cố. Các lượt này không tự thêm dữ liệu vào database local.
+
+Mở `automation/targets.csv` bằng Excel để chỉnh các cột:
+
+| Cột | Ý nghĩa |
+| --- | --- |
+| `keyword` | Từ khóa tìm kiếm |
+| `area` | Khu vực; nếu có dấu phẩy, đặt nội dung trong dấu ngoặc kép |
+| `target` | Mục tiêu từ 1 đến 200 |
+| `enrich_website` | `true` để đọc thêm website, `false` để bỏ qua |
+| `enabled` | `true` để chạy dòng đó, `false` để tạm tắt |
+
+Lưu CSV UTF-8, commit và push lên nhánh mặc định của repo trước giờ chạy. Mẫu hiện đang tắt để tránh một lượt cào bất ngờ; đổi `enabled` thành `true` cho các dòng cần chạy. Một lần tối đa 25 dòng. Nếu Google chặn hoặc kết nối lỗi, workflow dừng các truy vấn còn lại, gửi phần kết quả đã có và ghi trạng thái vào workbook.
+
+Trước khi dùng lịch mỗi tối, cần thêm các GitHub Actions Secrets vào repo: `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_TO`; `SMTP_PORT` mặc định là `587` và `MAIL_FROM` mặc định dùng tài khoản SMTP. `MAIL_TO` có thể chứa nhiều địa chỉ, ngăn cách bằng dấu phẩy. Không đặt mật khẩu email trong CSV hoặc commit vào repo. Chạy workflow thủ công lần đầu với một dòng nhỏ để xác nhận Google Maps và email hoạt động.
+
+Runner của GitHub là máy cloud tạm thời; Google Maps có thể giới hạn hoặc đóng kết nối từ runner. Lịch workflow cũng có thể bắt đầu trễ khi GitHub quá tải. Actions chỉ gửi file; muốn xem dữ liệu trong giao diện local thì cần nhập workbook riêng.
 
 ## Dùng thử
 

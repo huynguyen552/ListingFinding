@@ -18,3 +18,4 @@
 /playwright-report/
 /.playwright-cli/
 /output/
+/action-results/
