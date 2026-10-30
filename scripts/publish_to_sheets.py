@@ -80,10 +80,11 @@ class GoogleSheets:
 
     def values(self, method, sheet, cell_range, payload=None, query=""):
         a1_range = urllib.parse.quote(f"'{sheet}'!{cell_range}", safe="")
-        suffix = f"?{query}" if query else ""
+        operation = ":append" if method == "POST" else ""
+        query_suffix = f"?{query}" if query else ""
         return self.request(
             method,
-            f"/spreadsheets/{self.spreadsheet_id}/values/{a1_range}{suffix}",
+            f"/spreadsheets/{self.spreadsheet_id}/values/{a1_range}{operation}{query_suffix}",
             payload,
         )
 
