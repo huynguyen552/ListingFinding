@@ -48,7 +48,13 @@ class DirectSearchPage:
         return Element("address" if selector == '[data-item-id="address"]' else selector)
 
     def evaluate(self, script):
-        return {"name": "Quán thử", "address": "1 Đường A, Đà Nẵng"}
+        return {
+            "name": "Quán thử",
+            "address": "1 Đường A, Đà Nẵng",
+            "phone": "0901234567",
+            "website": "https://example.com/",
+            "category": "Quán ăn",
+        }
 
 
 def test_direct_search_result_is_not_discarded(auth):
@@ -71,6 +77,8 @@ def test_direct_search_result_is_not_discarded(auth):
         assert len(rows) == 1
         assert "/maps/search/" in rows[0].url
         assert rows[0].name == "Quán thử"
+        assert rows[0].raw_data["values"]["phone"] == "0901234567"
+        assert rows[0].raw_data["values"]["website"] == "https://example.com"
         assert db.get(CrawlJob, job_id).discovery_complete
 
 

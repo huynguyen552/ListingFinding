@@ -4,6 +4,8 @@
 
 Triển khai toàn bộ trên Render bằng `render.yaml` và Dockerfile ở thư mục gốc. Xem [hướng dẫn Render và UptimeRobot](docs/render.md) để tạo tài khoản quản trị, theo dõi dịch vụ và giữ dữ liệu. Bản Free là cấu hình thử nghiệm; cần kiểm tra giới hạn RAM khi chạy Chromium.
 
+Đã bổ sung chế độ đọc Maps tiết kiệm bộ nhớ: chỉ mở Chromium khi cần, dùng lại dữ liệu hồ sơ đã đọc và đóng trình duyệt trước khi lưu/đọc website. Xem [số đo và giới hạn kiểm tra](docs/performance.md); số đo local không bảo đảm mọi truy vấn đều vừa RAM của Render Free.
+
 Ứng dụng quản lý dữ liệu khách hàng tiềm năng cho quán ăn/nhà hàng, chạy trên máy cá nhân. Giao diện tiếng Việt, dữ liệu lưu trong PostgreSQL.
 
 ## Trạng thái hiện tại — 0.2.0

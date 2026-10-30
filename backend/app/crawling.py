@@ -53,6 +53,71 @@ class BlockedCrawl(Exception):
     pass
 
 
+class MapBrowser:
+    """Start Chromium only for a Maps read; release it before storing/enriching."""
+
+    def __init__(self):
+        self.playwright = None
+        self.browser = None
+
+    def __enter__(self):
+        return self
+
+    def page(self):
+        self.playwright = sync_playwright().start()
+        self.browser = self.playwright.chromium.launch(
+            headless=True, args=["--disable-dev-shm-usage", "--disable-features=BackForwardCache"]
+        )
+        context = self.browser.new_context(
+            locale="vi-VN", viewport={"width": 1365, "height": 900}, service_workers="block"
+        )
+        context.route("**/*", browser_route)
+        page = context.new_page()
+        page.set_default_timeout(5000)
+        return page
+
+    def read(self, url):
+        try:
+            return read_place(self.page(), url)
+        except BrowserError:
+            if self.browser and self.browser.is_connected():
+                raise ValueError(
+                    "Không đọc được địa điểm từ Google Maps; có thể bấm Tiếp tục để thử lại."
+                ) from None
+            raise
+        finally:
+            self.close()
+
+    def close(self):
+        try:
+            if self.browser:
+                try:
+                    self.browser.close()
+                except BrowserError:
+                    pass
+        finally:
+            self.browser = None
+            if self.playwright:
+                try:
+                    self.playwright.stop()
+                finally:
+                    self.playwright = None
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+def validated_place(data):
+    data = dict(data)
+    if not data.get("name") or not data.get("address"):
+        raise ValueError("Chưa đọc được tên hoặc địa chỉ của địa điểm.")
+    try:
+        data["website"] = website(data.get("website", ""))
+    except ValueError:
+        data["website"] = ""
+    return data
+
+
 def place_key(url):
     match = re.search(r"!1s([^!/?]+)", unquote(url))
     value = match.group(1) if match else url.split("?")[0]
@@ -151,12 +216,13 @@ def discover(page, job_id, token, keyword, area, target):
             "els => els.map(e => ({url:e.href,name:e.getAttribute('aria-label')||e.textContent||''}))"
         )
         if not feed.count() and page.locator('[data-item-id="address"]').count():
-            direct = page.evaluate(DETAIL_SCRIPT)
+            direct = validated_place(page.evaluate(DETAIL_SCRIPT))
             direct_name, direct_address = direct["name"], direct["address"]
             links = [
                 {
                     "url": page.url,
                     "name": direct_name,
+                    "details": direct,
                     "direct_key": identity(
                         {
                             "name": direct_name,
@@ -169,6 +235,9 @@ def discover(page, job_id, token, keyword, area, target):
             ]
         previous_seen = len(seen)
         with SessionLocal() as db:
+            job = db.scalar(select(CrawlJob).where(CrawlJob.id == job_id).with_for_update())
+            if not job or job.run_token != token or job.status != "running":
+                raise StopCrawl()
             for link in links:
                 if len(seen) >= min(target * 3, 200):
                     break
@@ -183,7 +252,7 @@ def discover(page, job_id, token, keyword, area, target):
                     continue
                 seen.add(key)
                 existing = db.scalar(
-                    select(CrawlEntry.id).where(
+                    select(CrawlEntry).where(
                         CrawlEntry.job_id == job_id, CrawlEntry.external_key == key
                     )
                 )
@@ -194,8 +263,15 @@ def discover(page, job_id, token, keyword, area, target):
                             external_key=key,
                             url=link["url"],
                             name=link["name"][:300],
+                            raw_data=(
+                                {"values": link["details"], "collected_at": now()}
+                                if link.get("details")
+                                else None
+                            ),
                         )
                     )
+                elif existing.state == "pending" and not existing.raw_data and link.get("details"):
+                    existing.raw_data = {"values": link["details"], "collected_at": now()}
             db.commit()
         idle = 0 if len(seen) > previous_seen else idle + 1
         tick(job_id, token, f"Đã tìm thấy {len(seen)} địa điểm ứng viên…")
@@ -223,15 +299,7 @@ def read_place(page, url):
     except BrowserTimeout:
         check_block(page)
         raise ValueError("Địa điểm chưa có địa chỉ đọc được.") from None
-    data = page.evaluate(DETAIL_SCRIPT)
-    if not data["name"] or not data["address"]:
-        raise ValueError("Chưa đọc được tên hoặc địa chỉ của địa điểm.")
-    if data["website"]:
-        try:
-            data["website"] = website(data["website"])
-        except ValueError:
-            data["website"] = ""
-    return data
+    return validated_place(page.evaluate(DETAIL_SCRIPT))
 
 
 def save_place(job_id, token, entry_id, values, extra_observations=(), website_error=""):
@@ -370,16 +438,12 @@ def run_crawl(job_id):
     robots_cache = {}
     area_matcher = AreaMatcher(area)
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True, args=["--disable-dev-shm-usage"])
-            context = browser.new_context(
-                locale="vi-VN", viewport={"width": 1365, "height": 900}, service_workers="block"
-            )
-            context.route("**/*", browser_route)
-            page = context.new_page()
-            page.set_default_timeout(5000)
+        with MapBrowser() as maps:
             if not discovery_complete:
-                discover(page, job_id, token, keyword, area, target)
+                try:
+                    discover(maps.page(), job_id, token, keyword, area, target)
+                finally:
+                    maps.close()
             while True:
                 tick(job_id, token)
                 with SessionLocal() as db:
@@ -398,7 +462,7 @@ def run_crawl(job_id):
                     values = (
                         dict(cached["values"])
                         if cached and cached.get("values")
-                        else read_place(page, url)
+                        else maps.read(url)
                     )
                     with SessionLocal() as db:
                         locked_job = db.scalar(
@@ -464,7 +528,7 @@ def run_crawl(job_id):
                                 warning = str(exc)[:300]
                     save_place(job_id, token, entry_id, values, extra, warning)
                 except (BrowserError, ValueError) as exc:
-                    if isinstance(exc, BrowserError) and not browser.is_connected():
+                    if isinstance(exc, BrowserError):
                         raise
                     message = (
                         "Không đọc được địa điểm từ Google Maps; có thể bấm Tiếp tục để thử lại."
@@ -473,7 +537,6 @@ def run_crawl(job_id):
                     )
                     record_entry_error(job_id, token, entry_id, "failed", message)
                 time.sleep(2)
-            browser.close()
         with SessionLocal() as db:
             count = crawl_counts(db, job_id)[0].get("done", 0)
             errors = db.scalar(
