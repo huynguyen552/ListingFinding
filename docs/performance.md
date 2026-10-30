@@ -51,3 +51,9 @@ Ngày 30/10/2026, sau yêu cầu kiểm tra tiếp, đã manual deploy `e46cb94`
 - Nếu vẫn timeout, kiểm tra chặn/xác minh và trạng thái tạm dừng/hủy trước, đóng trình duyệt tìm kiếm, rồi đọc những ứng viên đã lưu. Không đánh dấu tìm kiếm hoàn tất.
 - Nếu chưa đạt mục tiêu sau phần ứng viên đó, báo tạm dừng với lý do danh sách phản hồi chậm và cho tiếp tục. Không báo đã hết kết quả.
 - 118 kiểm thử backend qua trên SQLite; 10 ca hồi quy cache/browser/discovery qua trên PostgreSQL riêng trong image mới. Bao gồm timeout sau khi lưu ứng viên, giữ điện thoại, đạt mục tiêu, chưa đạt mục tiêu và Google yêu cầu xác minh.
+
+### Xác nhận sau deploy bản sửa timeout
+
+Render auto-deploy commit `5fef11b` thành công lúc 11:12 ngày 30/10/2026, giữ nguyên gói Free. Tiếp tục chính đợt coffee đã thất bại: xử lý đủ 13 ứng viên, lưu **4 quán** khớp Tây Thạnh, bỏ qua **9 quán** khác khu vực, không có hồ sơ lỗi. Tác vụ kết thúc `completed` lúc khoảng 11:18, không bị ngắt trong lượt này; readiness trả HTTP 200. Không đạt mục tiêu 100 do không có thêm kết quả đọc được phù hợp trong lượt tìm kiếm này. Không đổi mục tiêu hoặc nới bộ lọc để tăng số lượng.
+
+Render Free không cung cấp biểu đồ bộ nhớ ứng dụng, nên không có số đo RAM đỉnh thực tế trên cloud. Kết quả này xác nhận đợt trên đã hoàn tất sau sửa lỗi, không bảo đảm mọi truy vấn đều vừa 512 MB.
