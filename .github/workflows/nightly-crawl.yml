@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
-      - name: Check delivery channels
+      - name: Check Google Sheets input and delivery channels
         id: channels
         shell: bash
         env:
@@ -35,23 +35,19 @@ jobs:
           if [[ -n "${SMTP_HOST:-}" && -n "${SMTP_USERNAME:-}" && -n "${SMTP_PASSWORD:-}" && -n "${MAIL_TO:-}" ]]; then
             email_ready=true
           else
-            echo "::warning::Email is not fully configured; the Sheets channel will still run if configured."
+            echo "::warning::Email is not fully configured; results will still be written to Google Sheets."
           fi
 
           sheets_ready=false
           if [[ -n "${GOOGLE_SHEET_ID:-}" && -n "${GOOGLE_WORKLOAD_IDENTITY_PROVIDER:-}" && -n "${GOOGLE_SERVICE_ACCOUNT:-}" ]]; then
             sheets_ready=true
           else
-            echo "::warning::Google Sheets is not fully configured; the email channel will still run if configured."
+            echo "::error::Google Sheets is required because the crawl input is read from its Targets tab."
+            exit 1
           fi
 
           echo "email_ready=$email_ready" >> "$GITHUB_OUTPUT"
           echo "sheets_ready=$sheets_ready" >> "$GITHUB_OUTPUT"
-          if [[ "$email_ready" != true && "$sheets_ready" != true ]]; then
-            echo "::error::Configure at least one complete delivery channel before starting a crawl."
-            exit 1
-          fi
-
       - name: Checkout default branch
         uses: actions/checkout@v4
         with:
@@ -62,10 +58,25 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Authenticate to Google Sheets for crawl targets
+        id: google_input_auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets
+
+      - name: Load targets from Google Sheets
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google_input_auth.outputs.access_token }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+        run: python scripts/load_targets_from_sheets.py
+
       - name: Install workbook dependency
         run: python -m pip install --disable-pip-version-check openpyxl==3.1.5
 
-      - name: Validate CSV before starting services
+      - name: Validate spreadsheet targets before starting services
         run: python scripts/run_nightly_batch.py --validate-only
 
       - name: Start temporary LeadFinder stack
@@ -73,7 +84,7 @@ jobs:
           python scripts/manage.py init
           python scripts/manage.py start
 
-      - name: Collect from CSV and create Excel
+      - name: Collect spreadsheet targets and create Excel
         run: python scripts/run_nightly_batch.py
 
       - name: Send Excel by email

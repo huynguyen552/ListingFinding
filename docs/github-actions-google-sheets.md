@@ -59,6 +59,14 @@ Lệnh cuối trả về tên đầy đủ dạng `projects/.../locations/global
 
 Tạo hoặc mở Google Sheet, bấm **Share**, thêm email trong biến `SERVICE_ACCOUNT` và cấp quyền **Editor**. Lấy spreadsheet ID từ URL phần nằm giữa `/d/` và `/edit`.
 
+Tạo tab tên chính xác `Targets` để nhập danh sách cần thu thập. Hàng đầu tiên dùng các cột:
+
+```text
+keyword | area | target | enrich_website | enabled
+```
+
+`keyword`, `area` và `target` là bắt buộc. `enrich_website` và `enabled` mặc định là `true` nếu để trống. Mỗi workflow chạy tối đa 25 dòng đang bật; `target` nhận giá trị từ 1 đến 200. Nếu spreadsheet đã có tab trống `Trang tính1`, có thể đổi tên tab đó thành `Targets`.
+
 ## 4. Thêm GitHub Actions Secrets
 
 Trong repo, mở **Settings → Secrets and variables → Actions → New repository secret** và tạo:
@@ -69,8 +77,8 @@ Trong repo, mở **Settings → Secrets and variables → Actions → New reposi
 | `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` | Tên đầy đủ trả về ở bước 2 |
 | `GOOGLE_SERVICE_ACCOUNT` | Email service account, dạng `leadfinder-sheet-writer@PROJECT_ID.iam.gserviceaccount.com` |
 
-Email là kênh riêng. Để bật cả hai nơi nhận, cấu hình thêm `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `MAIL_TO` theo README. Workflow sẽ thử từng kênh độc lập và luôn giữ file Excel làm artifact 7 ngày.
+Email là kênh gửi tùy chọn. Để nhận workbook qua email, cấu hình thêm `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD` và `MAIL_TO` theo README. Workflow đọc input từ tab `Targets`, ghi kết quả vào Sheets và giữ file Excel làm artifact 7 ngày.
 
-Sau khi cấu hình, chạy workflow **LeadFinder nightly collection** thủ công với một dòng CSV nhỏ. Google Sheet sẽ được tạo các tab `Runs`, `Leads`, `Sources`, `Notifications`; mỗi lượt chạy được nối thêm cùng mã lần chạy và thời gian thu thập.
+Sau khi cấu hình, chạy workflow **LeadFinder nightly collection** thủ công với một dòng nhỏ đang bật ở tab `Targets`. Google Sheet sẽ được tạo các tab `Runs`, `Leads`, `Sources`, `Notifications`; mỗi lượt chạy được nối thêm cùng mã lần chạy và thời gian thu thập. Các lần chỉnh sửa input sau đó chỉ cần sửa tab `Targets`, không cần commit CSV.
 
 Tham khảo: [Google Cloud Workload Identity Federation cho pipeline](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines), [Google Sheets API append](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/append), [Google auth action](https://github.com/google-github-actions/auth).

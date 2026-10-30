@@ -35,9 +35,9 @@ Database local dùng volume Docker riêng. Nó không tự đồng bộ với da
 
 ## Thu thập tự động, email và Google Sheets
 
-GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Workflow tạo một database tạm, xử lý tuần tự các dòng đang bật trong `automation/targets.csv`, rồi tạo một file `.xlsx`. Sau đó, workflow độc lập thử gửi email và ghi dữ liệu vào Google Sheets; lỗi ở một kênh không ngăn thử kênh còn lại. File Excel được giữ trong GitHub Actions 7 ngày làm bản dự phòng. Các lượt này không tự thêm dữ liệu vào database local.
+GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Trước mỗi lượt, workflow đọc tab `Targets` từ Google Sheet, tạo input tạm trong runner, khởi động database tạm, xử lý tuần tự các dòng đang bật rồi tạo file `.xlsx`. Email là kênh gửi tùy chọn; kết quả được ghi nối tiếp vào Google Sheets. File Excel được giữ trong GitHub Actions 7 ngày làm bản dự phòng. Các lượt này không tự thêm dữ liệu vào database local.
 
-Mở `automation/targets.csv` bằng Excel để chỉnh các cột:
+Để thay đổi input tự động mà không commit, mở Google Sheet và sửa tab `Targets`. Hàng đầu tiên cần có các cột:
 
 | Cột | Ý nghĩa |
 | --- | --- |
@@ -47,13 +47,13 @@ Mở `automation/targets.csv` bằng Excel để chỉnh các cột:
 | `enrich_website` | `true` để đọc thêm website, `false` để bỏ qua |
 | `enabled` | `true` để chạy dòng đó, `false` để tạm tắt |
 
-Lưu CSV UTF-8, commit và push lên nhánh mặc định của repo trước giờ chạy. Mẫu hiện đang tắt để tránh một lượt cào bất ngờ; đổi `enabled` thành `true` cho các dòng cần chạy. Một lần tối đa 25 dòng. Nếu Google chặn hoặc kết nối lỗi, workflow dừng các truy vấn còn lại, gửi phần kết quả đã có và ghi trạng thái vào workbook.
+`keyword`, `area`, `target` là bắt buộc; `enrich_website` và `enabled` mặc định là `true` nếu để trống. Các giá trị bật/tắt chấp nhận `true/false`, `yes/no` hoặc `1/0`. Mỗi lượt tối đa 25 dòng đang bật; `target` từ 1 đến 200. Có thể tạm dừng một mục tiêu bằng cách đặt `enabled` thành `false`. Tab phải tên chính xác `Targets`; nếu đang có tab trống `Trang tính1`, có thể đổi tên tab đó rồi nhập hàng tiêu đề. Nếu tab chưa được tạo, workflow tạm dùng `automation/targets.csv` và ghi cảnh báo; sau khi tạo tab, workflow sẽ dùng Google Sheet. File CSV vẫn dùng được cho các lượt chạy batch trực tiếp từ repo.
 
 Để gửi email, thêm Actions Secrets: `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_TO`; `SMTP_PORT` mặc định là `587` và `MAIL_FROM` mặc định dùng tài khoản SMTP. `MAIL_TO` có thể chứa nhiều địa chỉ, ngăn cách bằng dấu phẩy.
 
-Để ghi Google Sheets, bật Google Sheets API trong Google Cloud, cấu hình Workload Identity Federation cho repo này và chia sẻ spreadsheet với email tài khoản dịch vụ quyền **Editor**. Thêm các Secrets `GOOGLE_SHEET_ID`, `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` (tên đầy đủ của provider) và `GOOGLE_SERVICE_ACCOUNT` (email tài khoản dịch vụ). Workflow tự tạo các tab `Runs`, `Leads`, `Sources` và `Notifications`, sau đó nối thêm dòng của mỗi lượt chạy. Nên giới hạn provider chỉ tin cậy repo `huynguyen552/ListingFinding`. Xem [hướng dẫn thiết lập chi tiết](docs/github-actions-google-sheets.md), [Google Cloud WIF](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines) và [Google Sheets API append](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/append).
+Để đọc input và ghi kết quả Google Sheets, bật Google Sheets API trong Google Cloud, cấu hình Workload Identity Federation cho repo này và chia sẻ spreadsheet với email tài khoản dịch vụ quyền **Editor**. Thêm các Secrets `GOOGLE_SHEET_ID`, `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` (tên đầy đủ của provider) và `GOOGLE_SERVICE_ACCOUNT` (email tài khoản dịch vụ). Workflow đọc tab `Targets`, đồng thời tự tạo các tab kết quả `Runs`, `Leads`, `Sources` và `Notifications`, sau đó nối thêm dòng của mỗi lượt chạy. Google Sheets là bắt buộc để chạy workflow; email là tùy chọn. Nên giới hạn provider chỉ tin cậy repo `huynguyen552/ListingFinding`. Xem [hướng dẫn thiết lập chi tiết](docs/github-actions-google-sheets.md), [Google Cloud WIF](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines) và [Google Sheets API append](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets.values/append).
 
-Cần cấu hình đầy đủ ít nhất một kênh trước khi chạy; nếu email hoặc Sheets thiếu cấu hình, kênh còn lại vẫn được chạy. Không đưa mật khẩu email, access token hoặc khóa tài khoản dịch vụ vào CSV hay commit. Chạy workflow thủ công lần đầu với một dòng nhỏ để xác nhận quyền truy cập, Google Maps và nơi nhận dữ liệu.
+Workflow cần cấu hình Google Sheets vì tab `Targets` là nguồn input và cũng là nơi lưu kết quả. Email có thể bỏ qua nếu chưa cấu hình; nếu email gặp lỗi, dữ liệu vẫn được ghi vào Sheets. Không đưa mật khẩu email, access token hoặc khóa tài khoản dịch vụ vào CSV hay commit. Chạy workflow thủ công lần đầu với một dòng nhỏ để xác nhận quyền truy cập, Google Maps và nơi nhận dữ liệu.
 
 Runner của GitHub là máy cloud tạm thời; Google Maps có thể giới hạn hoặc đóng kết nối từ runner. Lịch workflow cũng có thể bắt đầu trễ khi GitHub quá tải. Google Sheets lưu dữ liệu qua các lần chạy; các địa điểm có thể lặp lại giữa những đợt thu thập. Muốn xem dữ liệu trong giao diện local thì cần nhập workbook riêng.
 

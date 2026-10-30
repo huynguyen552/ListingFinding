@@ -163,7 +163,7 @@ def read_queries(path):
         if len(queries) > MAX_QUERIES:
             raise ValueError(f"Chỉ nhận tối đa {MAX_QUERIES} dòng đang bật trong một đêm.")
     if not queries:
-        raise ValueError("Không có dòng đầu vào nào đang bật trong automation/targets.csv.")
+        raise ValueError("Không có dòng input nào đang bật.")
     return queries
 
 
@@ -465,7 +465,7 @@ def main():
     try:
         if args.validate_only:
             queries = read_queries(args.input)
-            print(f"CSV hợp lệ; có {len(queries)} truy vấn đang bật.")
+            print(f"Input hợp lệ; có {len(queries)} truy vấn đang bật.")
             return 0
         return run(args)
     except Exception as exc:
