@@ -1,0 +1,32 @@
+# Free trial layout: all application processes share one web instance.
+# Upgrade this web service if Chromium exceeds the free instance's memory.
+services:
+  - type: web
+    name: leadfinder
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health/ready
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leadfinder-db
+          property: connectionString
+      - key: INITIAL_ADMIN_USERNAME
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: SECURE_COOKIES
+        value: "1"
+      - key: REDIS_URL
+        value: redis://127.0.0.1:6379/0
+databases:
+  - name: leadfinder-db
+    databaseName: leadfinder
+    user: leadfinder
+    plan: free
+    region: singapore
+    postgresMajorVersion: "17"
+    ipAllowList: []
