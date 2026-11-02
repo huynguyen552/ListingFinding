@@ -5,6 +5,56 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 
+TAX_LABEL = re.compile(
+    r"(?:mã\s*số\s*(?:thuế(?:\s*(?:doanh\s*nghiệp|dn))?|doanh\s*nghiệp|đơn\s*vị)"
+    r"|\bMST\b|tax\s*(?:code|id|number)|vat\s*(?:id|no\.?|number)?|\bTIN\b)",
+    re.I,
+)
+LABELED_TAX_CODE = re.compile(
+    r"(?:mã\s*số\s*(?:thuế(?:\s*(?:doanh\s*nghiệp|dn))?|doanh\s*nghiệp|đơn\s*vị)"
+    r"|\bMST\b|tax\s*(?:code|id|number)|vat\s*(?:id|no\.?|number)?|\bTIN\b)"
+    r"\s*[:：#\-]?\s*"
+    r"(?P<number>\d(?:[\s.\-]?\d){9}"
+    r"(?:\s*[\-–.]?\s*\d(?:[\s.\-]?\d){2})?)"
+    r"(?![\d\s.\-]*\d)",
+    re.I,
+)
+
+
+def normalize_tax_code(value):
+    """Return a plausible Vietnamese tax code without inventing missing digits."""
+    if not isinstance(value, (str, int)) or isinstance(value, bool):
+        return ""
+    digits = re.sub(r"\D", "", str(value))
+    return digits if len(digits) in (10, 13) else ""
+
+
+def structured_tax_code(node):
+    for key in ("taxID", "taxId", "vatID", "vatId", "vatNumber"):
+        code = normalize_tax_code(node.get(key))
+        if code:
+            return code
+
+    identifiers = node.get("identifier", [])
+    if isinstance(identifiers, dict):
+        identifiers = [identifiers]
+    if isinstance(identifiers, list):
+        for identifier in identifiers:
+            if not isinstance(identifier, dict):
+                continue
+            label = " ".join(
+                str(identifier.get(key, ""))
+                for key in ("propertyID", "name", "@type")
+            )
+            if TAX_LABEL.search(label):
+                code = normalize_tax_code(
+                    identifier.get("value", identifier.get("identifier", ""))
+                )
+                if code:
+                    return code
+    return ""
+
+
 def extract_website(html, url):
     soup = BeautifulSoup(html, "html.parser")
     for node in soup(["script", "style", "noscript"]):
@@ -38,14 +88,17 @@ def extract_website(html, url):
             ):
                 if isinstance(node.get(source), str):
                     result.setdefault(target, node[source].strip())
+            if "tax_code" not in result:
+                code = structured_tax_code(node)
+                if code:
+                    result["tax_code"] = code
     text = soup.get_text(" ", strip=True)
-    match = re.search(
-        r"(?:mã\s*số\s*thuế|mã\s*số\s*doanh\s*nghiệp|\bMST\b|tax\s*(?:code|id))\s*[:：\-]?\s*(\d{10}(?:[-\s]?\d{3})?)(?!\d|[-\s]+\d)",
-        text,
-        re.I,
-    )
-    if match:
-        result["tax_code"] = re.sub(r"[^0-9]", "", match.group(1))
+    if "tax_code" not in result:
+        match = LABELED_TAX_CODE.search(text)
+        if match:
+            code = normalize_tax_code(match.group("number"))
+            if code:
+                result["tax_code"] = code
     links = []
     for anchor in soup.select("a[href]"):
         try:
@@ -63,7 +116,10 @@ def extract_website(html, url):
         if host == "zalo.me":
             result.setdefault("zalo", href)
         if parts.netloc == urlsplit(url).netloc and re.search(
-            r"lien[-_]?he|contact|gioi[-_]?thieu|about", parts.path, re.I
+            r"lien[-_]?he|contact|gioi[-_]?thieu|about|doanh[-_]?nghiep|"
+            r"thong[-_]?tin|tax|legal|company|business|ma[-_]?so[-_]?thue",
+            parts.path,
+            re.I,
         ):
             links.append(href.split("#")[0])
     return result, list(dict.fromkeys(links))[:2]
