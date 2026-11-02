@@ -87,6 +87,14 @@ jobs:
       - name: Collect spreadsheet targets and create Excel
         run: python scripts/run_nightly_batch.py
 
+      - name: Look up collected tax codes with VietQR
+        if: always() && hashFiles('action-results/leadfinder-nightly.xlsx') != ''
+        continue-on-error: true
+        env:
+          LEADFINDER_WORKBOOK: action-results/leadfinder-nightly.xlsx
+          VIETQR_MAX_LOOKUPS: "100"
+        run: python scripts/verify_tax_codes_vietqr.py
+
       - name: Send Excel by email
         if: always() && steps.channels.outputs.email_ready == 'true' && hashFiles('action-results/leadfinder-nightly.xlsx') != ''
         env:

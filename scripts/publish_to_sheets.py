@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 import sys
 import unicodedata
 import urllib.error
@@ -35,6 +34,21 @@ SHEET_HEADERS = {
     ],
     "Sources": ["Từ khóa", "Khu vực", "Mã địa điểm", "Trường", "Giá trị", "Nguồn", "Tham chiếu", "Thời gian"],
     "Notifications": ["Từ khóa", "Khu vực", "Tên địa điểm", "Trạng thái", "Chi tiết"],
+    "Tax Verification": [
+        "Từ khóa",
+        "Khu vực",
+        "Mã địa điểm",
+        "Tên quán",
+        "Địa chỉ quán",
+        "MST ứng viên",
+        "Kết quả tra cứu VietQR",
+        "MST trả về",
+        "Tên pháp nhân/hộ kinh doanh",
+        "Địa chỉ đăng ký MST",
+        "Mô tả phản hồi",
+        "Dữ liệu cập nhật lúc",
+        "Thời điểm tra cứu",
+    ],
 }
 
 
@@ -180,6 +194,8 @@ def column_label(number):
 
 
 def read_table(workbook, title, fallback):
+    if title not in workbook.sheetnames:
+        return fallback, []
     sheet = workbook[title]
     rows = list(sheet.iter_rows(values_only=True))
     if not rows or not any(value is not None for value in rows[0]):
@@ -211,10 +227,11 @@ def publish(path):
     notices_headers, notices_rows = read_table(
         workbook, "Thông báo", SHEET_HEADERS["Notifications"]
     )
+    tax_headers, tax_rows = read_table(workbook, "Xác minh MST", SHEET_HEADERS["Tax Verification"])
     workbook.close()
 
     sheet = GoogleSheets(spreadsheet_id, access_token)
-    sheet.ensure_tabs(["Runs", "Leads", "Sources", "Notifications"])
+    sheet.ensure_tabs(["Runs", "Leads", "Sources", "Notifications", "Tax Verification"])
     sheet.append_table(
         "Runs",
         META_HEADERS + summary_headers,
@@ -227,6 +244,7 @@ def publish(path):
     for tab, headers, rows in (
         ("Sources", sources_headers, sources_rows),
         ("Notifications", notices_headers, notices_rows),
+        ("Tax Verification", tax_headers, tax_rows),
     ):
         sheet.append_table(
             tab,
@@ -237,7 +255,8 @@ def publish(path):
         "Đã ghi Google Sheets: "
         f"{len(summary_rows)} dòng tổng hợp, thêm {leads_added} địa điểm mới, "
         f"bỏ qua {leads_duplicates} địa điểm trùng, "
-        f"{len(sources_rows)} nguồn, {len(notices_rows)} thông báo.",
+        f"{len(sources_rows)} nguồn, {len(notices_rows)} thông báo, "
+        f"{len(tax_rows)} dòng tra cứu MST.",
         flush=True,
     )
 

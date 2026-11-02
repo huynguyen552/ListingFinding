@@ -35,7 +35,9 @@ Database local dùng volume Docker riêng. Nó không tự đồng bộ với da
 
 ## Thu thập tự động, email và Google Sheets
 
-GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Trước mỗi lượt, workflow đọc tab `Targets` từ Google Sheet, tạo input tạm trong runner, khởi động database tạm, xử lý tuần tự các dòng đang bật rồi tạo file `.xlsx`. Email là kênh gửi tùy chọn; kết quả được ghi nối tiếp vào Google Sheets. File Excel được giữ trong GitHub Actions 7 ngày làm bản dự phòng. Các lượt này không tự thêm dữ liệu vào database local.
+GitHub Actions chạy workflow `.github/workflows/nightly-crawl.yml` lúc **23:17 giờ Việt Nam** mỗi tối, hoặc chạy thủ công trong tab **Actions**. Trước mỗi lượt, workflow đọc tab `Targets` từ Google Sheet, tạo input tạm trong runner, khởi động database tạm, xử lý tuần tự các dòng đang bật rồi tạo file `.xlsx`. Sau khi thu thập, workflow tra cứu các MST ứng viên trên VietQR (tối đa 100 MST duy nhất mỗi lượt, gọi tuần tự cách nhau 2 giây; demo API công khai không cần key; nếu nhận HTTP 429 thì chờ theo `Retry-After` và thử lại một lần, sau đó dừng tra cứu nếu vẫn bị giới hạn). Kết quả tra cứu được ghi vào sheet `Xác minh MST` trong Excel và tab `Tax Verification` trên Google Sheets. Email là kênh gửi tùy chọn; kết quả được ghi nối tiếp vào Google Sheets. File Excel được giữ trong GitHub Actions 7 ngày làm bản dự phòng. Các lượt này không tự thêm dữ liệu vào database local.
+
+VietQR chỉ tra cứu theo MST đã có, không tìm MST từ tên quán. Kết quả “Tra cứu thấy MST” xác nhận API trả về hồ sơ với mã đó, nhưng không chứng minh quán thuộc pháp nhân/hộ kinh doanh trả về; cần đối chiếu tên và địa chỉ. VietQR công bố API này ngừng hoạt động từ **01/03/2027** và chuyển dịch vụ tra cứu sang Xinvoice, nên đây là tích hợp tạm thời cần thay trước thời điểm đó. Xem [tài liệu API VietQR](https://www.vietqr.io/tra-cuu-mst).
 
 Để thay đổi input tự động mà không commit, mở Google Sheet và sửa tab `Targets`. Hàng đầu tiên cần có các cột:
 
