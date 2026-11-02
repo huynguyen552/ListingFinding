@@ -2,7 +2,9 @@
 
 import json
 import os
+import re
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -89,6 +91,10 @@ class GoogleSheets:
         )
 
     def append_table(self, title, headers, rows):
+        self.ensure_headers(title, headers)
+        self.append_rows(title, rows)
+
+    def ensure_headers(self, title, headers):
         existing = self.values("GET", title, "1:1").get("values", [])
         if not existing:
             self.values(
@@ -102,6 +108,8 @@ class GoogleSheets:
             raise RuntimeError(
                 f"Tiêu đề tab {title} không khớp LeadFinder; giữ nguyên dữ liệu hiện có."
             )
+
+    def append_rows(self, title, rows):
         if rows:
             self.values(
                 "POST",
@@ -111,6 +119,34 @@ class GoogleSheets:
                 "valueInputOption=RAW&insertDataOption=INSERT_ROWS",
             )
 
+    def append_unique_leads(self, headers, rows):
+        title = "Leads"
+        full_headers = META_HEADERS + headers
+        self.ensure_headers(title, full_headers)
+        end_column = column_label(len(full_headers))
+        existing_rows = self.values("GET", title, f"A:{end_column}").get("values", [])
+        name_index = full_headers.index("Tên quán")
+        address_index = full_headers.index("Địa chỉ")
+        seen = {
+            lead_key(row, name_index, address_index)
+            for row in existing_rows[1:]
+            if lead_key(row, name_index, address_index)
+        }
+
+        unique_rows = []
+        duplicate_count = 0
+        for row in rows:
+            key = lead_key(row, name_index, address_index)
+            if key and key in seen:
+                duplicate_count += 1
+                continue
+            if key:
+                seen.add(key)
+            unique_rows.append(row)
+
+        self.append_rows(title, unique_rows)
+        return len(unique_rows), duplicate_count
+
 
 def cell_value(value):
     if value is None:
@@ -118,6 +154,29 @@ def cell_value(value):
     if isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def normalize_match(value):
+    text = unicodedata.normalize("NFD", str(value or "").casefold())
+    text = text.replace("đ", "d")
+    text = "".join(char for char in text if unicodedata.category(char) != "Mn")
+    return " ".join("".join(char if char.isalnum() else " " for char in text).split())
+
+
+def lead_key(row, name_index, address_index):
+    name = normalize_match(row[name_index] if name_index < len(row) else "")
+    address = normalize_match(row[address_index] if address_index < len(row) else "")
+    if not name or not address:
+        return None
+    return name, address
+
+
+def column_label(number):
+    label = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        label = chr(65 + remainder) + label
+    return label
 
 
 def read_table(workbook, title, fallback):
@@ -161,8 +220,11 @@ def publish(path):
         META_HEADERS + summary_headers,
         [[run_id, collected_at, *row] for row in summary_rows],
     )
+    leads_added, leads_duplicates = sheet.append_unique_leads(
+        leads_headers,
+        [[run_id, collected_at, *row] for row in leads_rows],
+    )
     for tab, headers, rows in (
-        ("Leads", leads_headers, leads_rows),
         ("Sources", sources_headers, sources_rows),
         ("Notifications", notices_headers, notices_rows),
     ):
@@ -173,7 +235,8 @@ def publish(path):
         )
     print(
         "Đã ghi Google Sheets: "
-        f"{len(summary_rows)} dòng tổng hợp, {len(leads_rows)} địa điểm, "
+        f"{len(summary_rows)} dòng tổng hợp, thêm {leads_added} địa điểm mới, "
+        f"bỏ qua {leads_duplicates} địa điểm trùng, "
         f"{len(sources_rows)} nguồn, {len(notices_rows)} thông báo.",
         flush=True,
     )
