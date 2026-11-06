@@ -53,6 +53,35 @@ def test_street_prefix_and_house_variants(address):
     assert AreaMatcher(AREA).matches(address)
 
 
+@pytest.mark.parametrize(
+    "address, expected",
+    [
+        (
+            "Khu Phố Mỹ An/2-1B Phạm Thái Bường, Tân Hưng, Hồ Chí Minh, Việt Nam",
+            True,
+        ),
+        (
+            "Biệt Thự Nam Thiên, Phạm Thái Bường, Tân Hưng, Hồ Chí Minh, Việt Nam",
+            True,
+        ),
+        (
+            "Phạm Thái Bường Đông, Tân Hưng, Hồ Chí Minh, Việt Nam",
+            False,
+        ),
+    ],
+)
+def test_road_can_follow_a_compound_prefix_without_matching_longer_road(address, expected):
+    area = "Đường Phạm Thái Bường, Quận 7, Thành phố Hồ Chí Minh"
+    assert AreaMatcher(area).matches(address) is expected
+
+
+def test_embedded_road_still_keeps_the_requested_administrative_area():
+    area = "Đường Phạm Thái Bường, Quận 7, Thành phố Hồ Chí Minh"
+    assert not AreaMatcher(area).matches(
+        "Biệt Thự Nam Thiên, Phạm Thái Bường, Bình Hưng Hòa, Hồ Chí Minh, Việt Nam"
+    )
+
+
 def test_street_aliases_in_query():
     address = "571 Huỳnh Tấn Phát, Tân Thuận, Hồ Chí Minh"
     assert text_matches(address, "Đ. Huỳnh Tấn Phát, Phường Tân Thuận, TP.HCM")

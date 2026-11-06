@@ -54,6 +54,30 @@ def test_aliases_and_number_boundaries():
     assert canonical("Q.07, TP.HCM") == "quan7 hochiminh"
 
 
+@pytest.mark.parametrize(
+    "address",
+    [
+        "812 Trường Sa, Nhiêu Lộc, Hồ Chí Minh, Việt Nam",
+        "28 Phạm Ngọc Thạch, Xuân Hòa, Hồ Chí Minh 700000, Việt Nam",
+        "540/17 Cách Mạng Tháng Tám, Nhiêu Lộc, Hồ Chí Minh, Việt Nam",
+        "Phường Bàn Cờ, Hồ Chí Minh, Việt Nam",
+    ],
+)
+def test_former_district3_matches_its_current_wards(address):
+    area = "Quận 3, Thành phố Hồ Chí Minh"
+    assert text_matches(address, area)
+    assert AreaMatcher(area).matches(address)
+
+
+def test_former_district3_does_not_match_other_areas():
+    assert not text_matches(
+        "Xuân Hòa, Đà Nẵng, Việt Nam", "Quận 3, Thành phố Hồ Chí Minh"
+    )
+    assert not text_matches(
+        "Tân Định, Hồ Chí Minh, Việt Nam", "Quận 3, Thành phố Hồ Chí Minh"
+    )
+
+
 def test_viewport_is_not_place_coordinates_and_narrower_area_is_retained():
     url = "https://www.google.com/maps/place/test/@10.739,106.708,13z/data=!3d10.777!4d106.700"
     assert place_coordinates(url) == (106.700, 10.777)

@@ -120,7 +120,37 @@ def street_component(address):
 
 def street_matches(address, wanted):
     candidate, _, _ = street_component(address)
-    return candidate == wanted
+    if candidate == wanted:
+        return True
+
+    # Maps sometimes prefixes the road with a compound or neighborhood name,
+    # e.g. "Khu phố Mỹ An/2-1B Phạm Thái Bường". Match the exact road phrase
+    # inside each address component, while keeping word boundaries so a
+    # similarly named road (such as Đường số 70 vs Đường số 7) cannot match.
+    needle = re.sub(r"[^a-z0-9]+", " ", wanted).strip()
+    if not needle:
+        return False
+    phrase = re.compile(
+        r"(?<!\w)" + re.escape(needle) + r"(?=$|\s+\d+[a-z]?(?:\s|$))"
+    )
+    for part in split_parts(address):
+        normalized_part = normalized(part)
+        part_canonical = canonical(part)
+        if (
+            ADMIN_PREFIX.match(normalized_part)
+            or part_canonical in {"hochiminh", "vietnam"}
+            or any(part_canonical in wards for wards in DISTRICT_WARDS.values())
+        ):
+            continue
+        searchable = re.sub(r"[^a-z0-9]+", " ", normalized_part).strip()
+        for match in phrase.finditer(searchable):
+            preceding = searchable[: match.start()].split()
+            # Do not treat the family name Dương as the road designator
+            # Đường when the requested road begins with Đức, for example.
+            if preceding and preceding[-1] in {"duong", "street", "road"}:
+                continue
+            return True
+    return False
 
 
 def administrative_address(address, force_street=False):
@@ -138,8 +168,10 @@ def is_district7(area):
 
 # Only wards wholly within a former district can prove membership without
 # coordinates. Bình Hưng Hòa crosses the former Tân Phú boundary, so it is
-# intentionally absent. Sources: Resolution 1685, clauses 18–21 and 62–66.
+# intentionally absent. Quận 3 cũ was reorganized into Bàn Cờ, Xuân Hòa, and
+# Nhiêu Lộc. Sources: Resolution 1685, clauses 5–7, 18–21, and 62–66.
 DISTRICT_WARDS = {
+    "quan3": {"ban co", "xuan hoa", "nhieu loc"},
     "quan7": {"tan thuan", "phu thuan", "tan my", "tan hung"},
     "quantanphu": {"tay thanh", "tan son nhi", "phu tho hoa", "tan phu", "phu thanh"},
 }
