@@ -90,8 +90,10 @@ def constraints(area, address=""):
             index == 0
             and len(pieces) >= 2
             and not ADMIN_PREFIX.match(normalized(part))
-            and confident
-            and candidate == street_name(part)
+            and (
+                (confident and candidate == street_name(part))
+                or street_matches(address, street_name(part))
+            )
             and canonical(part) not in admin_components(administrative_address(address))
         ):
             # Accept a bare leading road name only with evidence from the
@@ -124,15 +126,13 @@ def street_matches(address, wanted):
         return True
 
     # Maps sometimes prefixes the road with a compound or neighborhood name,
-    # e.g. "Khu phố Mỹ An/2-1B Phạm Thái Bường". Match the exact road phrase
-    # inside each address component, while keeping word boundaries so a
-    # similarly named road (such as Đường số 70 vs Đường số 7) cannot match.
+    # e.g. "Khu phố Mỹ An/2-1B Phạm Thái Bường", or omits punctuation between
+    # two crossing roads. Keep word boundaries so similar road names cannot
+    # match (for example, Đường số 70 vs Đường số 7).
     needle = re.sub(r"[^a-z0-9]+", " ", wanted).strip()
     if not needle:
         return False
-    phrase = re.compile(
-        r"(?<!\w)" + re.escape(needle) + r"(?=$|\s+\d+[a-z]?(?:\s|$))"
-    )
+    phrase = re.compile(r"(?<!\w)" + re.escape(needle) + r"(?!\w)")
     for part in split_parts(address):
         normalized_part = normalized(part)
         part_canonical = canonical(part)
@@ -145,11 +145,43 @@ def street_matches(address, wanted):
         searchable = re.sub(r"[^a-z0-9]+", " ", normalized_part).strip()
         for match in phrase.finditer(searchable):
             preceding = searchable[: match.start()].split()
+            following = searchable[match.end() :].strip().split()
             # Do not treat the family name Dương as the road designator
             # Đường when the requested road begins with Đức, for example.
             if preceding and preceding[-1] in {"duong", "street", "road"}:
                 continue
-            return True
+            if not following:
+                return True
+            # Some Maps addresses append a house number or an intersection's
+            # cross street without punctuation ("Lê Quý Đôn Võ Thị Sáu").
+            if re.fullmatch(r"\d+[a-z]?", following[0]):
+                return True
+            has_address_prefix = not preceding or HOUSE_ONLY.fullmatch(" ".join(preceding))
+            has_cross_street = (
+                2 <= len(following) <= 4
+                and all(re.fullmatch(r"[a-z]+", word) for word in following)
+                and not any(
+                    word in {
+                        "bac",
+                        "dong",
+                        "nam",
+                        "tay",
+                        "noi",
+                        "dai",
+                        "phuong",
+                        "quan",
+                        "ward",
+                        "district",
+                        "ho",
+                        "chi",
+                        "minh",
+                        "vietnam",
+                    }
+                    for word in following
+                )
+            )
+            if has_address_prefix and has_cross_street:
+                return True
     return False
 
 

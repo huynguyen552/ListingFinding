@@ -26,7 +26,9 @@ TERMINAL_STATUSES = {
     "no_results",
     "paused",
 }
-STOP_BATCH_STATUSES = {"blocked", "cancelled", "failed", "paused"}
+# A Maps feed may stall after returning useful partial results. Keep that row
+# marked paused, but continue independent targets in the nightly spreadsheet.
+STOP_BATCH_STATUSES = {"blocked", "cancelled", "failed"}
 MAX_QUERIES = 25
 POLL_SECONDS = 5
 
@@ -358,6 +360,19 @@ def run(args):
                     outcome["message"],
                 ]
             )
+            if job["status"] == "paused" and not timed_out:
+                outcome["message"] = (
+                    f"Đã lưu {outcome['saved']}/{query.target} địa điểm. Maps ngừng tải thêm; "
+                    "đã giữ kết quả một phần trong workbook và workflow sẽ tiếp tục các dòng sau. "
+                    "Lượt này chưa đạt mục tiêu."
+                )
+                summary.cell(row=summary.max_row, column=10, value=outcome["message"])
+                print(
+                    "::warning::"
+                    f"Truy vấn {index}/{len(queries)} tạm dừng sau khi Maps ngừng tải thêm; "
+                    f"đã giữ {outcome['saved']} địa điểm và sẽ tiếp tục các dòng sau.",
+                    flush=True,
+                )
             if job["status"] in STOP_BATCH_STATUSES or timed_out:
                 had_failure = True
                 for pending in queries[index:]:

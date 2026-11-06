@@ -82,6 +82,25 @@ def test_embedded_road_still_keeps_the_requested_administrative_area():
     )
 
 
+@pytest.mark.parametrize(
+    "address",
+    [
+        "Lê Quý Đôn/33 Võ Thị Sáu, Xuân Hòa, Hồ Chí Minh 700000, Việt Nam",
+        "Lê Quý Đôn Võ Thị Sáu, Xuân Hòa, Hồ Chí Minh 700000, Việt Nam",
+    ],
+)
+def test_bare_road_query_matches_maps_intersection_address(address):
+    area = "Lê Quý Đôn, Quận 3, Thành phố Hồ Chí Minh"
+    assert AreaMatcher(area).matches(address)
+
+
+def test_bare_road_query_does_not_match_other_road_in_same_ward():
+    area = "Lê Quý Đôn, Quận 3, Thành phố Hồ Chí Minh"
+    assert not AreaMatcher(area).matches(
+        "28 Phạm Ngọc Thạch, Xuân Hòa, Hồ Chí Minh 700000, Việt Nam"
+    )
+
+
 def test_street_aliases_in_query():
     address = "571 Huỳnh Tấn Phát, Tân Thuận, Hồ Chí Minh"
     assert text_matches(address, "Đ. Huỳnh Tấn Phát, Phường Tân Thuận, TP.HCM")
