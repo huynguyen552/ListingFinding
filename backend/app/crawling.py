@@ -91,27 +91,47 @@ class BlockedCrawl(Exception):
 
 
 class MapBrowser:
-    """Start Chromium only for a Maps read; release it before storing/enriching."""
+    """Reuse Chromium across a job, while isolating each Maps page in its context."""
 
     def __init__(self):
         self.playwright = None
         self.browser = None
+        self.context = None
+        self._page = None
 
     def __enter__(self):
         return self
 
     def page(self):
-        self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=True, args=["--disable-dev-shm-usage", "--disable-features=BackForwardCache"]
-        )
-        context = self.browser.new_context(
-            locale="vi-VN", viewport={"width": 1365, "height": 900}, service_workers="block"
-        )
-        context.route("**/*", browser_route)
-        page = context.new_page()
-        page.set_default_timeout(5000)
-        return page
+        if self.browser and not self.browser.is_connected():
+            self.close()
+        if not self.browser:
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--disable-features=BackForwardCache"],
+            )
+        if self.context is None:
+            self.context = self.browser.new_context(
+                locale="vi-VN",
+                viewport={"width": 1365, "height": 900},
+                service_workers="block",
+            )
+            self.context.route("**/*", browser_route)
+            self._page = self.context.new_page()
+            self._page.set_default_timeout(5000)
+        return self._page
+
+    def close_context(self):
+        try:
+            if self.context:
+                try:
+                    self.context.close()
+                except BrowserError:
+                    pass
+        finally:
+            self.context = None
+            self._page = None
 
     def read(self, url):
         try:
@@ -123,10 +143,11 @@ class MapBrowser:
                 ) from None
             raise
         finally:
-            self.close()
+            self.close_context()
 
     def close(self):
         try:
+            self.close_context()
             if self.browser:
                 try:
                     self.browser.close()
@@ -525,12 +546,12 @@ def run_crawl(job_id):
     try:
         with MapBrowser() as maps:
             if not discovery_complete:
-                try:
-                    discovery_incomplete = (
-                        discover(maps.page(), job_id, token, keyword, area, target) is False
-                    )
-                finally:
-                    maps.close()
+                discovery_incomplete = (
+                    discover(maps.page(), job_id, token, keyword, area, target) is False
+                )
+                # Discovery can collect many links. Release its page/context before
+                # reading individual places, but keep Chromium warm for the job.
+                maps.close_context()
             while True:
                 tick(job_id, token)
                 with SessionLocal() as db:
